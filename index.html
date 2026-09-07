@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calendar Club</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#A81B2E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Calendar Club">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F5F6F4; --card:#FFFFFF; --ink:#151D22; --muted:#66736D; --line:#DEE3E0;
+  --accent:#A81B2E; --live:#0E6B54; --amber:#9C6612; --sink:#EEF0ED;
+  --radius:10px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0E1417; --card:#161E22; --ink:#E7EDE9; --muted:#8B9992; --line:#283338;
+    --accent:#E4596B; --live:#4FBFA1; --amber:#D8A24A; --sink:#1D262B;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-size:16px; line-height:1.45; -webkit-text-size-adjust:100%;
+  font-variant-numeric:tabular-nums;
+}
+h1,h2,h3{margin:0; font-weight:700; letter-spacing:-0.015em}
+button,input,select,textarea{font:inherit; color:inherit}
+a{color:var(--accent)}
+
+/* ---------- shell ---------- */
+.wrap{max-width:940px; margin:0 auto; padding:0 16px 96px}
+header.top{
+  position:sticky; top:0; z-index:20; background:var(--paper);
+  border-bottom:1px solid var(--line); padding-top:env(safe-area-inset-top);
+}
+.topin{max-width:940px; margin:0 auto; padding:12px 16px 0; display:flex; align-items:baseline; gap:12px}
+.brand{font-size:19px; font-weight:700; letter-spacing:-0.02em}
+.brand em{font-style:normal; color:var(--accent)}
+.who{margin-left:auto; font-size:13px; color:var(--muted)}
+.who button{background:none; border:0; color:var(--muted); text-decoration:underline; cursor:pointer; padding:0 0 0 10px}
+nav{max-width:940px; margin:0 auto; padding:8px 16px 0; display:flex; gap:2px; overflow-x:auto; scrollbar-width:none}
+nav::-webkit-scrollbar{display:none}
+nav button{
+  background:none; border:0; border-bottom:2px solid transparent; padding:8px 12px 10px;
+  color:var(--muted); cursor:pointer; white-space:nowrap; font-weight:500;
+}
+nav button[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+
+/* ---------- season summary ---------- */
+.season{
+  display:flex; flex-wrap:wrap; gap:22px; align-items:flex-end;
+  padding:22px 0 18px; border-bottom:1px solid var(--line); margin-bottom:16px;
+}
+.season .yr{font-size:34px; font-weight:700; letter-spacing:-0.03em; line-height:1}
+.stat{display:flex; flex-direction:column; gap:2px}
+.stat b{font-size:19px; font-weight:600}
+.stat span{font-size:12px; color:var(--muted)}
+.stat .up{color:var(--live)} .stat .down{color:var(--accent)}
+
+/* ---------- controls ---------- */
+.controls{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px}
+.search{
+  flex:1 1 220px; min-width:0; padding:10px 12px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--card);
+}
+select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--card)}
+.btn{
+  padding:10px 14px; border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--card); cursor:pointer; font-weight:500;
+}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+.btn:disabled{opacity:.5; cursor:default}
+
+/* ---------- list ---------- */
+.count{font-size:13px; color:var(--muted); margin:0 0 10px}
+.rows{display:flex; flex-direction:column; gap:8px}
+.row{
+  width:100%; text-align:left; background:var(--card); border:1px solid var(--line);
+  border-radius:var(--radius); padding:13px 15px; cursor:pointer; display:block;
+}
+.row:hover{border-color:var(--muted)}
+.row:focus-visible,.btn:focus-visible,nav button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.row h3{font-size:16.5px}
+.rmeta{font-size:13.5px; color:var(--muted); margin-top:2px}
+.rfoot{display:flex; gap:14px; align-items:center; margin-top:9px; font-size:13px; flex-wrap:wrap}
+.tag{font-size:12px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--sink); color:var(--muted)}
+.tag.live{background:color-mix(in srgb,var(--live) 15%,transparent); color:var(--live)}
+.tag.soon{background:color-mix(in srgb,var(--amber) 18%,transparent); color:var(--amber)}
+.money .pos{color:var(--live); font-weight:600}
+.money .neg{color:var(--accent); font-weight:600}
+
+/* the trading window: 1 Sep -> 31 Jan */
+.window{position:relative; height:6px; background:var(--sink); border-radius:3px; margin-top:11px}
+.window i{position:absolute; top:0; bottom:0; background:var(--live); border-radius:3px}
+.window u{position:absolute; top:-3px; width:2px; height:12px; background:var(--amber); text-decoration:none}
+.wlabels{display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:3px}
+
+/* ---------- detail ---------- */
+.sheet{
+  position:fixed; inset:0; z-index:40; background:var(--paper); overflow-y:auto;
+  padding:env(safe-area-inset-top) 0 40px;
+}
+.sheet .wrap{padding-top:14px}
+.sheetbar{
+  position:sticky; top:0; background:var(--paper); border-bottom:1px solid var(--line);
+  padding:10px 16px; display:flex; gap:10px; align-items:center; z-index:2;
+}
+.sheetbar .ttl{font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sheetbar .sp{margin-left:auto; display:flex; gap:8px}
+h2.detail{font-size:26px; letter-spacing:-0.025em; margin:16px 0 2px}
+.sub{color:var(--muted); margin-bottom:18px}
+section.grp{margin:22px 0}
+section.grp > h3{
+  font-size:13px; font-weight:600; color:var(--muted); padding-bottom:6px;
+  border-bottom:1px solid var(--line); margin-bottom:10px;
+}
+.fields{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px 22px}
+.f label{display:block; font-size:12px; color:var(--muted); margin-bottom:3px}
+.f .val{min-height:22px; word-break:break-word}
+.f .val.empty{color:var(--muted)}
+.f input,.f select,.f textarea{
+  width:100%; padding:8px 10px; border:1px solid var(--line);
+  border-radius:8px; background:var(--card);
+}
+.f textarea{min-height:70px; resize:vertical}
+.f.wide{grid-column:1/-1}
+.calc{background:var(--sink); border-radius:var(--radius); padding:12px 14px}
+.people-list{display:flex; flex-direction:column; gap:6px}
+.plink{
+  display:flex; gap:10px; align-items:center; background:var(--card);
+  border:1px solid var(--line); border-radius:8px; padding:8px 12px; width:100%;
+  text-align:left; cursor:pointer;
+}
+.plink .role{margin-left:auto; font-size:12px; color:var(--muted)}
+.plink .x{margin-left:8px; color:var(--accent); background:none; border:0; cursor:pointer; font-size:16px}
+.addp{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+.addp select{flex:1 1 150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card)}
+
+/* ---------- login ---------- */
+.login{max-width:340px; margin:14vh auto; padding:0 20px; text-align:left}
+.login h1{font-size:30px; letter-spacing:-0.03em; margin-bottom:6px}
+.login p{color:var(--muted); margin:0 0 22px}
+.login input{width:100%; padding:11px 12px; margin-bottom:10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--card)}
+.login .btn{width:100%}
+.err{color:var(--accent); font-size:14px; margin-top:12px; min-height:20px}
+.toast{
+  position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:60;
+  background:var(--ink); color:var(--paper); padding:10px 18px; border-radius:24px;
+  font-size:14px; opacity:0; pointer-events:none; transition:opacity .2s;
+}
+.toast.on{opacity:1}
+.empty-state{text-align:center; color:var(--muted); padding:50px 20px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ============ SETTINGS: paste your two Supabase values here ============ -->
+<script>
+const SUPABASE_URL = "https://YOUR-PROJECT-ID.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";
+</script>
+<!-- ====================================================================== -->
+
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const app = document.getElementById('app');
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const TBL = {                  // short name in the app -> table in Supabase
+  cities:'cc_cities', store_types:'cc_store_types', people:'cc_people',
+  locations:'cc_locations', shops:'cc_shops', shop_people:'cc_shop_people',
+  members:'cc_members',
+};
+let D = {};                    // every table, held in memory
+let myRole = null;             // admin, editor or viewer
+let tab = 'shops';
+let filters = { q:'', year:'', status:'' };
+let openRec = null;            // {table, id} currently on screen
+let editing = false;
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 2200);
+}
+
+/* ---------------------------------------------------------------- helpers */
+const money = v => v == null || v === '' ? '' :
+  '£' + Number(v).toLocaleString('en-GB', {maximumFractionDigits:0});
+const money2 = v => v == null || v === '' ? '' :
+  '£' + Number(v).toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
+const ukDate = d => !d ? '' :
+  new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'});
+
+function daysOpen(s){
+  if (!s.opening_date || !s.closedown_date) return null;
+  const a = new Date(s.opening_date), b = new Date(s.closedown_date);
+  return Math.round((b - a) / 86400000) + 1;
+}
+function weeksLabel(days){
+  if (days == null) return '';
+  const w = Math.round(days / 7), d = days - w * 7;
+  if (d === 0) return w + ' weeks';
+  return w + ' weeks ' + (d < 0 ? '− ' + Math.abs(d) : '+ ' + d) + ' day' + (Math.abs(d) === 1 ? '' : 's');
+}
+const difference = s => (s.budget == null || s.actual == null) ? null : s.actual - s.budget;
+const variation = s => (!s.budget || s.actual == null) ? null : ((s.actual - s.budget) / s.budget) * 100;
+const budgetAmt = s => (s.budget == null || s.commission_pct == null) ? null : s.budget * s.commission_pct / 100;
+const actualAmt = s => (s.actual == null || s.commission_pct == null) ? null : s.actual * s.commission_pct / 100;
+
+const canEdit = t => myRole === 'admin' || (myRole === 'editor' && t !== 'members');
+const titleOf = (t, r) => t === 'members' ? (r.email || '') : (r.name || '');
+
+const nameOf = (table, id) => { const r = (D[table] || []).find(x => x.id === id); return r ? r.name : ''; };
+const peopleOn = shopId => (D.shop_people || []).filter(l => l.shop_id === shopId)
+  .map(l => ({...l, name: nameOf('people', l.person_id)}))
+  .sort((a,b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
+
+function currentYear(){
+  const years = [...new Set((D.shops || []).map(s => s.operating_year))].sort();
+  const now = new Date(), y = now.getFullYear();
+  const guess = now.getMonth() >= 7 ? `${y}-${String((y+1)%100).padStart(2,'0')}`
+                                    : `${y-1}-${String(y%100).padStart(2,'0')}`;
+  return years.includes(guess) ? guess : years[years.length - 1] || '';
+}
+
+/* ---------------------------------------------- what each field looks like */
+const SHOP_FIELDS = [
+  ['Where', [
+    ['name','Store name','text'], ['operating_year','Operating year','text'],
+    ['city_id','City','ref:cities'], ['location_id','Mall or arcade','ref:locations'],
+    ['type_id','Store type','ref:store_types'],
+  ]],
+  ['Status', [
+    ['store_status','Store status','opt:Reserve|Pending|Active|Open and Trading'],
+    ['operator_status','Operator status','opt:No Operator|Possible|Confirmed|Cancelled|Final Commissions Paid'],
+    ['contract_signed','Contract','opt:Awaiting|Sent Form|Form Signed'],
+    ['lock_in_year','Locked to this year','bool'],
+  ]],
+  ['Dates', [
+    ['build_date','Build date','date'], ['opening_date','Opening date','date'],
+    ['closedown_date','Closedown date','date'],
+    ['tm_visit_1','1st TM visit','datetime'], ['tm_visit_2','2nd TM visit','datetime'],
+  ]],
+  ['Build day', [
+    ['build_start_time','Build starts','time'], ['pallet_delivery_time','Pallets arrive','time'],
+    ['delivery_booked','Delivery booked','opt:|Confirmed|Awaiting'],
+    ['permit_required','Permit required','bool'], ['rams_sips_sent','RAMS & SIPS sent','bool'],
+    ['build_signoff','Signed off by Gemma','bool'], ['tm_attending','TM attending','bool'],
+  ]],
+  ['Money', [
+    ['budget','Budget','money'], ['actual','Actual','money'],
+    ['dated_budget','Dated budget','money'], ['dated_actual','Dated actual','money'],
+    ['gift_budget','Gift budget','money'], ['gift_actual','Gift actual','money'],
+    ['commission_pct','Commission %','number'], ['pct_two_plus','% two plus','number'],
+  ]],
+  ['Notes and files', [
+    ['notes','Notes','textarea'], ['build_plan_url','Build plan','url'],
+    ['layout_url','Mall/shop layout','url'],
+  ]],
+];
+const PERSON_FIELDS = [['Person', [
+  ['name','Name','text'], ['role','Main role','opt:Operator|Builder|Store Staff|TM|Management|Centre Management'],
+  ['other_roles','Other roles','text'], ['email','Email','text'],
+  ['phone1','Phone','text'], ['phone2','Second phone','text'],
+  ['address','Address','text'], ['city_id','City','ref:cities'], ['postcode','Postcode','text'],
+  ['details','Details','textarea'],
+]]];
+const LOCATION_FIELDS = [
+  ['The centre', [
+    ['name','Mall or arcade','text'], ['street_address','Street address','text'],
+    ['city_id','City','ref:cities'], ['postcode','Postcode','text'],
+    ['contact_person_id','Contact person','ref:people'],
+  ]],
+  ['Getting there', [
+    ['store_location','Store location','coords'], ['delivery_location','Delivery point','coords'],
+    ['parking_building','Parking building','text'], ['parking_location','Parking location','coords'],
+    ['parking_what3words','what3words','url'], ['parking_charges','Parking charges','textarea'],
+  ]],
+  ['Notes', [['notes','Notes','textarea']]],
+];
+const TYPE_FIELDS = [['Store type', [
+  ['name','Type name','text'], ['builders_required','Builders required','number'],
+  ['grid_pallet','Includes 8ft grid pallet','bool'],
+  ['specialised_tools','Specialised tools','text'], ['notes','Notes','textarea'],
+]]];
+const CITY_FIELDS = [['City', [['name','City name','text']]]];
+const MEMBER_FIELDS = [['Access', [
+  ['email','Email they sign in with','text'], ['name','Name','text'],
+  ['role','What they can do','opt:viewer|editor|admin'],
+]]];
+
+const TABLES = {
+  shops:      {label:'Stores',    fields:SHOP_FIELDS,     single:'Store'},
+  people:     {label:'People',    fields:PERSON_FIELDS,   single:'Person'},
+  locations:  {label:'Places',    fields:LOCATION_FIELDS, single:'Place'},
+  store_types:{label:'Types',     fields:TYPE_FIELDS,     single:'Store type'},
+  cities:     {label:'Cities',    fields:CITY_FIELDS,     single:'City'},
+  members:    {label:'Access',    fields:MEMBER_FIELDS,   single:'Person with access', adminOnly:true},
+};
+
+/* ------------------------------------------------------------ data loading */
+async function loadAll(){
+  const mine = await db.from(TBL.members).select('*')
+    .ilike('email', session.user.email).maybeSingle();
+  if (mine.error) throw mine.error;
+  myRole = mine.data ? mine.data.role : null;
+  if (!myRole) return;
+
+  const names = ['cities','store_types','people','locations','shops','shop_people'];
+  if (myRole === 'admin') names.push('members');
+  const res = await Promise.all(names.map(n =>
+    db.from(TBL[n]).select('*').order(n === 'shop_people' ? 'id' : n === 'members' ? 'email' : 'name')));
+  names.forEach((n, i) => {
+    if (res[i].error) throw res[i].error;
+    D[n] = res[i].data;
+  });
+  D.shops.sort((a,b) => (b.operating_year || '').localeCompare(a.operating_year || '')
+    || (a.name || '').localeCompare(b.name || ''));
+}
+
+/* --------------------------------------------------------------- rendering */
+function render(){
+  app.innerHTML = `
+    <header class="top">
+      <div class="topin">
+        <div class="brand">Calendar <em>Club</em></div>
+        <div class="who">${esc(session?.user?.email || '')}<button id="out">Sign out</button></div>
+      </div>
+      <nav role="tablist">
+        ${Object.entries(TABLES).filter(([,v]) => !v.adminOnly || myRole === 'admin').map(([k,v]) =>
+          `<button role="tab" aria-selected="${k===tab}" data-tab="${k}">${v.label}</button>`).join('')}
+      </nav>
+    </header>
+    <main class="wrap">${tab === 'shops' ? shopsScreen() : listScreen(tab)}</main>`;
+
+  document.getElementById('out').onclick = async () => { await db.auth.signOut(); location.reload(); };
+  app.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+    tab = b.dataset.tab; filters = {q:'', year:filters.year, status:''}; render();
+  });
+  wireList();
+  if (openRec) drawSheet();
+}
+
+function shopsScreen(){
+  const years = [...new Set(D.shops.map(s => s.operating_year))].sort().reverse();
+  const inYear = D.shops.filter(s => !filters.year || s.operating_year === filters.year);
+  const bud = inYear.reduce((t,s) => t + (s.budget || 0), 0);
+  const act = inYear.reduce((t,s) => t + (s.actual || 0), 0);
+  const diff = act - bud;
+
+  return `
+    <div class="season">
+      <div><div class="yr">${esc(filters.year || 'All years')}</div></div>
+      <div class="stat"><b>${inYear.length}</b><span>stores</span></div>
+      <div class="stat"><b>${money(bud)}</b><span>budget</span></div>
+      <div class="stat"><b>${money(act)}</b><span>actual</span></div>
+      <div class="stat"><b class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '+' : '−'}${money(Math.abs(diff))}</b><span>difference</span></div>
+    </div>
+    <div class="controls">
+      <input class="search" id="q" placeholder="Search store, city, mall or person" value="${esc(filters.q)}">
+      <select class="filter" id="year">
+        <option value="">All years</option>
+        ${years.map(y => `<option ${y===filters.year?'selected':''}>${esc(y)}</option>`).join('')}
+      </select>
+      <select class="filter" id="status">
+        <option value="">Any status</option>
+        ${['Reserve','Pending','Active','Open and Trading']
+          .map(s => `<option ${s===filters.status?'selected':''}>${s}</option>`).join('')}
+      </select>
+      ${canEdit('shops') ? '<button class="btn primary" id="new">Add store</button>' : ''}
+    </div>
+    <div id="list"></div>`;
+}
+
+function listScreen(t){
+  return `
+    <div class="controls" style="margin-top:20px">
+      <input class="search" id="q" placeholder="Search ${TABLES[t].label.toLowerCase()}" value="${esc(filters.q)}">
+      ${canEdit(t) ? `<button class="btn primary" id="new">Add ${TABLES[t].single.toLowerCase()}</button>` : ''}
+    </div>
+    <div id="list"></div>`;
+}
+
+function wireList(){
+  const q = document.getElementById('q');
+  if (q) q.oninput = () => { filters.q = q.value; drawList(); };
+  const y = document.getElementById('year');
+  if (y) y.onchange = () => { filters.year = y.value; render(); };
+  const st = document.getElementById('status');
+  if (st) st.onchange = () => { filters.status = st.value; drawList(); };
+  const nb = document.getElementById('new');
+  if (nb) nb.onclick = () => { openRec = {table:tab, id:null}; editing = true; drawSheet(); };
+  drawList();
+}
+
+function matches(text){
+  const q = filters.q.trim().toLowerCase();
+  return !q || q.split(/\s+/).every(w => text.toLowerCase().includes(w));
+}
+
+function drawList(){
+  const box = document.getElementById('list');
+  if (!box) return;
+  let items, html;
+
+  if (tab === 'shops'){
+    items = D.shops.filter(s =>
+      (!filters.year || s.operating_year === filters.year) &&
+      (!filters.status || s.store_status === filters.status) &&
+      matches([s.name, s.operating_year, nameOf('cities', s.city_id), nameOf('locations', s.location_id),
+               nameOf('store_types', s.type_id), s.store_status,
+               peopleOn(s.id).map(p => p.name).join(' ')].join(' ')));
+    html = items.map(shopRow).join('');
+  } else {
+    items = D[tab].filter(r => matches(Object.values(r).join(' ')));
+    html = items.map(r => plainRow(tab, r)).join('');
+  }
+
+  box.innerHTML = items.length
+    ? `<p class="count">${items.length} ${items.length === 1 ? 'record' : 'records'}</p><div class="rows">${html}</div>`
+    : `<div class="empty-state">Nothing matches “${esc(filters.q)}”. Try fewer words.</div>`;
+  box.querySelectorAll('.row').forEach(r => r.onclick = () => {
+    openRec = {table:tab, id:Number(r.dataset.id)}; editing = false; drawSheet();
+  });
+}
+
+function tradingWindow(s){
+  // 1 Sep to 31 Jan, as a proportion of the 152-day season
+  const yr = parseInt((s.operating_year || '').slice(0,4), 10);
+  if (!yr || (!s.opening_date && !s.build_date)) return '';
+  const start = new Date(yr, 8, 1), end = new Date(yr + 1, 0, 31);
+  const pos = d => Math.max(0, Math.min(100, ((new Date(d) - start) / (end - start)) * 100));
+  let bar = '';
+  if (s.opening_date && s.closedown_date){
+    const a = pos(s.opening_date), b = pos(s.closedown_date);
+    bar += `<i style="left:${a}%;width:${Math.max(1, b - a)}%"></i>`;
+  }
+  if (s.build_date) bar += `<u style="left:${pos(s.build_date)}%" title="Build"></u>`;
+  return `<div class="window">${bar}</div>
+          <div class="wlabels"><span>Sep</span><span>Nov</span><span>Jan</span></div>`;
+}
+
+function shopRow(s){
+  const d = difference(s), v = variation(s), days = daysOpen(s);
+  const cls = s.store_status === 'Open and Trading' ? 'live'
+            : s.store_status === 'Active' ? 'soon' : '';
+  const ops = peopleOn(s.id).filter(p => p.role === 'Operator').map(p => p.name);
+  return `
+    <button class="row" data-id="${s.id}">
+      <h3>${esc(s.name)}</h3>
+      <div class="rmeta">${esc([nameOf('store_types', s.type_id), s.operating_year,
+        ops.length ? ops.join(' & ') : 'No operator'].filter(Boolean).join(' · '))}</div>
+      <div class="rfoot">
+        <span class="tag ${cls}">${esc(s.store_status || 'No status')}</span>
+        ${days ? `<span>${days} days open</span>` : ''}
+        ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
+          d != null ? ` <span class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '−'}${money(Math.abs(d))}${
+            v != null ? ` (${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%)` : ''}</span>` : ''}</span>` : ''}
+      </div>
+      ${tradingWindow(s)}
+    </button>`;
+}
+
+function plainRow(t, r){
+  let meta = '';
+  if (t === 'people'){
+    const jobs = (D.shop_people || []).filter(l => l.person_id === r.id).length;
+    meta = [r.role, r.phone1, r.email, jobs ? `${jobs} store${jobs === 1 ? '' : 's'}` : '']
+      .filter(Boolean).join(' · ');
+  } else if (t === 'locations'){
+    meta = [nameOf('cities', r.city_id), r.postcode].filter(Boolean).join(' · ');
+  } else if (t === 'store_types'){
+    meta = [r.builders_required ? r.builders_required + ' builders' : '',
+            r.grid_pallet ? '8ft grid pallet' : '', r.specialised_tools].filter(Boolean).join(' · ');
+  } else if (t === 'cities'){
+    meta = `${D.shops.filter(s => s.city_id === r.id).length} stores`;
+  } else if (t === 'members'){
+    meta = [r.name, r.role === 'admin' ? 'Full access, manages this list'
+                  : r.role === 'editor' ? 'Can change records' : 'Can look, not change']
+      .filter(Boolean).join(' · ');
+  }
+  return `<button class="row" data-id="${r.id}"><h3>${esc(titleOf(t, r))}</h3>
+          ${meta ? `<div class="rmeta">${esc(meta)}</div>` : ''}</button>`;
+}
+
+/* ------------------------------------------------------------- the record */
+function blank(t){
+  const r = {};
+  TABLES[t].fields.forEach(([, fs]) => fs.forEach(([k]) => r[k] = null));
+  if (t === 'shops') r.operating_year = currentYear();
+  return r;
+}
+
+function drawSheet(){
+  const t = openRec.table;
+  const rec = openRec.id ? D[t].find(r => r.id === openRec.id) : blank(t);
+  if (!rec){ closeSheet(); return; }
+
+  const mayEdit = canEdit(t);
+  if (editing && !mayEdit) editing = false;
+  const title = openRec.id ? titleOf(t, rec) : 'New ' + TABLES[t].single.toLowerCase();
+  const sub = t === 'shops' && openRec.id
+    ? [nameOf('cities', rec.city_id), nameOf('locations', rec.location_id), rec.operating_year]
+        .filter(Boolean).join(' · ')
+    : '';
+
+  const el = document.createElement('div');
+  el.className = 'sheet'; el.id = 'sheet';
+  el.innerHTML = `
+    <div class="sheetbar">
+      <button class="btn" id="back">${editing ? 'Cancel' : 'Back'}</button>
+      <div class="ttl">${esc(title)}</div>
+      <div class="sp">
+        ${editing ? `<button class="btn primary" id="save">Save</button>`
+                  : mayEdit ? `<button class="btn" id="edit">Edit</button>` : ''}
+      </div>
+    </div>
+    <div class="wrap">
+      <h2 class="detail">${esc(title)}</h2>
+      ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}
+      <form id="form" autocomplete="off">
+        ${t === 'shops' && openRec.id ? calcBlock(rec) : ''}
+        ${TABLES[t].fields.map(([grp, fs]) => `
+          <section class="grp"><h3>${esc(grp)}</h3><div class="fields">
+            ${fs.map(f => fieldHtml(f, rec)).join('')}
+          </div></section>`).join('')}
+        ${t === 'shops' && openRec.id ? peopleBlock(rec) : ''}
+        ${t === 'people' && openRec.id ? storesBlock(rec) : ''}
+      </form>
+      ${openRec.id && mayEdit ? `<button class="btn" id="del" style="margin-top:26px; color:var(--accent)">Delete this ${TABLES[t].single.toLowerCase()}</button>` : ''}
+      <div class="err" id="err"></div>
+    </div>`;
+
+  document.getElementById('sheet')?.remove();
+  document.body.appendChild(el);
+
+  el.querySelector('#back').onclick = () => { editing ? (editing = false, drawSheet()) : closeSheet(); };
+  el.querySelector('#edit')?.addEventListener('click', () => { editing = true; drawSheet(); });
+  el.querySelector('#save')?.addEventListener('click', () => save(t, rec));
+  el.querySelector('#del')?.addEventListener('click', () => remove(t, rec));
+  el.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
+    const [gt, gid] = b.dataset.goto.split(':');
+    tab = gt; openRec = {table:gt, id:Number(gid)}; editing = false; render();
+  });
+  el.querySelectorAll('[data-unlink]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    await unlink(Number(b.dataset.unlink));
+  });
+  const addBtn = el.querySelector('#addlink');
+  if (addBtn) addBtn.onclick = () => link(rec.id);
+}
+
+function closeSheet(){
+  openRec = null; editing = false;
+  document.getElementById('sheet')?.remove();
+}
+
+function fieldHtml([k, label, type], rec){
+  const v = rec[k];
+  const wide = type === 'textarea' || type === 'url' ? ' wide' : '';
+  let body;
+
+  if (!editing){
+    let shown = '';
+    if (type.startsWith('ref:')) shown = nameOf(type.slice(4), v);
+    else if (type === 'bool') shown = v == null ? '' : (v ? 'Yes' : 'No');
+    else if (type === 'money') shown = money2(v);
+    else if (type === 'date') shown = ukDate(v);
+    else if (type === 'datetime') shown = v ? new Date(v).toLocaleString('en-GB',
+      {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'}) : '';
+    else if (type === 'time') shown = v ? String(v).slice(0,5) : '';
+    else if (type === 'number') shown = v == null ? '' : v;
+    else shown = v ?? '';
+
+    if (type === 'url' && v) body = `<div class="val"><a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.length > 60 ? v.slice(0,60) + '…' : v)}</a></div>`;
+    else if (type === 'coords' && v) body = `<div class="val"><a href="https://www.google.com/maps?q=${encodeURIComponent(v)}" target="_blank" rel="noopener">Open in maps</a></div>`;
+    else body = `<div class="val${shown === '' ? ' empty' : ''}">${esc(shown === '' ? '—' : shown)}</div>`;
+    return `<div class="f${wide}"><label>${esc(label)}</label>${body}</div>`;
+  }
+
+  const val = v == null ? '' : v;
+  if (type.startsWith('ref:')){
+    const src = type.slice(4);
+    body = `<select name="${k}"><option value="">—</option>${
+      [...D[src]].sort((a,b) => a.name.localeCompare(b.name)).map(o =>
+        `<option value="${o.id}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
+  } else if (type.startsWith('opt:')){
+    body = `<select name="${k}">${type.slice(4).split('|').map(o =>
+      `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(o || '—')}</option>`).join('')}</select>`;
+  } else if (type === 'bool'){
+    body = `<select name="${k}"><option value="">—</option>
+      <option value="true" ${v === true ? 'selected' : ''}>Yes</option>
+      <option value="false" ${v === false ? 'selected' : ''}>No</option></select>`;
+  } else if (type === 'textarea'){
+    body = `<textarea name="${k}">${esc(val)}</textarea>`;
+  } else {
+    const it = type === 'date' ? 'date' : type === 'time' ? 'time'
+             : type === 'datetime' ? 'datetime-local'
+             : (type === 'money' || type === 'number') ? 'number' : 'text';
+    const step = type === 'money' ? ' step="0.01"' : type === 'number' ? ' step="0.01"' : '';
+    const dv = type === 'datetime' && val ? String(val).slice(0,16)
+             : type === 'time' && val ? String(val).slice(0,5) : val;
+    body = `<input type="${it}"${step} name="${k}" value="${esc(dv)}">`;
+  }
+  return `<div class="f${wide}"><label>${esc(label)}</label>${body}</div>`;
+}
+
+function calcBlock(s){
+  const days = daysOpen(s), d = difference(s), v = variation(s);
+  const bits = [
+    ['Days open', days ?? '—'], ['Trading period', weeksLabel(days) || '—'],
+    ['Difference', d == null ? '—' : (d >= 0 ? '+' : '−') + money2(Math.abs(d))],
+    ['Variation', v == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1) + '%'],
+    ['Budget commission', money2(budgetAmt(s)) || '—'],
+    ['Actual commission', money2(actualAmt(s)) || '—'],
+  ];
+  return `<section class="grp"><h3>Worked out from the figures below</h3>
+    <div class="calc"><div class="fields">${bits.map(([l, x]) =>
+      `<div class="f"><label>${l}</label><div class="val">${esc(x)}</div></div>`).join('')}</div></div>
+    ${tradingWindow(s)}</section>`;
+}
+
+function peopleBlock(s){
+  const list = peopleOn(s.id);
+  const mayEdit = canEdit('shops');
+  const roles = ['Operator','Builder','Store Staff','TM','Centre Management'];
+  return `<section class="grp"><h3>Who is on this store</h3>
+    <div class="people-list">
+      ${list.length ? list.map(p => `
+        <div class="plink" data-goto="people:${p.person_id}">
+          <span>${esc(p.name)}</span><span class="role">${esc(p.role)}</span>
+          ${mayEdit ? `<button type="button" class="x" data-unlink="${p.id}" title="Remove">×</button>` : ''}
+        </div>`).join('') : '<div class="rmeta">Nobody attached yet.</div>'}
+    </div>
+    ${!mayEdit ? '' : `<div class="addp">
+      <select id="np"><option value="">Choose a person…</option>${
+        [...D.people].sort((a,b) => a.name.localeCompare(b.name))
+          .map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <select id="nr">${roles.map(r => `<option>${r}</option>`).join('')}</select>
+      <button type="button" class="btn" id="addlink">Add</button>
+    </div>`}</section>`;
+}
+
+function storesBlock(p){
+  const links = (D.shop_people || []).filter(l => l.person_id === p.id)
+    .map(l => ({...l, shop: D.shops.find(s => s.id === l.shop_id)}))
+    .filter(l => l.shop)
+    .sort((a,b) => (b.shop.operating_year || '').localeCompare(a.shop.operating_year || ''));
+  const tms = D.shops.filter(s => s.tm_id === p.id);
+  const all = [...links.map(l => [l.shop, l.role]), ...tms.map(s => [s, 'TM'])];
+  if (!all.length) return '';
+  return `<section class="grp"><h3>Stores</h3><div class="people-list">
+    ${all.map(([s, role]) => `<div class="plink" data-goto="shops:${s.id}">
+      <span>${esc(s.name)}</span><span class="role">${esc(s.operating_year)} · ${esc(role)}</span>
+    </div>`).join('')}</div></section>`;
+}
+
+/* ----------------------------------------------------------------- saving */
+function collect(t, rec){
+  const form = document.getElementById('form');
+  const out = {};
+  TABLES[t].fields.forEach(([, fs]) => fs.forEach(([k, , type]) => {
+    const el = form.elements[k];
+    if (!el) return;
+    let v = el.value;
+    if (v === '') { out[k] = null; return; }
+    if (type.startsWith('ref:')) out[k] = Number(v);
+    else if (type === 'bool') out[k] = v === 'true';
+    else if (type === 'money' || type === 'number') out[k] = Number(v);
+    else out[k] = v;
+  }));
+  return out;
+}
+
+async function save(t, rec){
+  const err = document.getElementById('err');
+  const patch = collect(t, rec);
+  const key = t === 'members' ? 'email' : 'name';
+  if (!patch[key]){
+    err.textContent = t === 'members' ? 'Enter the email address they sign in with.'
+                                      : 'Give it a name before saving.';
+    return;
+  }
+  document.getElementById('save').disabled = true;
+  try {
+    if (openRec.id){
+      const {data, error} = await db.from(TBL[t]).update(patch).eq('id', openRec.id).select().single();
+      if (error) throw error;
+      Object.assign(D[t].find(r => r.id === openRec.id), data);
+    } else {
+      const {data, error} = await db.from(TBL[t]).insert(patch).select().single();
+      if (error) throw error;
+      D[t].push(data); openRec.id = data.id;
+    }
+    editing = false; drawSheet(); drawList(); toast('Saved');
+  } catch (e){
+    err.textContent = 'Could not save: ' + e.message;
+    document.getElementById('save').disabled = false;
+  }
+}
+
+async function remove(t, rec){
+  if (!confirm(`Delete ${titleOf(t, rec)}? This cannot be undone.`)) return;
+  const {error} = await db.from(TBL[t]).delete().eq('id', rec.id);
+  if (error){ document.getElementById('err').textContent = 'Could not delete: ' + error.message; return; }
+  D[t] = D[t].filter(r => r.id !== rec.id);
+  if (t === 'shops') D.shop_people = D.shop_people.filter(l => l.shop_id !== rec.id);
+  if (t === 'people') D.shop_people = D.shop_people.filter(l => l.person_id !== rec.id);
+  closeSheet(); render(); toast('Deleted');
+}
+
+async function link(shopId){
+  const pid = Number(document.getElementById('np').value);
+  const role = document.getElementById('nr').value;
+  if (!pid) return;
+  const {data, error} = await db.from(TBL.shop_people)
+    .insert({shop_id:shopId, person_id:pid, role}).select().single();
+  if (error){
+    document.getElementById('err').textContent =
+      error.code === '23505' ? 'That person is already on this store with that role.' : error.message;
+    return;
+  }
+  D.shop_people.push(data); drawSheet(); drawList();
+}
+
+async function unlink(linkId){
+  const {error} = await db.from(TBL.shop_people).delete().eq('id', linkId);
+  if (error){ toast('Could not remove'); return; }
+  D.shop_people = D.shop_people.filter(l => l.id !== linkId);
+  drawSheet(); drawList();
+}
+
+/* ------------------------------------------------------------------- login */
+let session = null;
+
+function loginScreen(msg){
+  app.innerHTML = `
+    <div class="login">
+      <h1>Calendar Club</h1>
+      <p>Sign in to see the stores.</p>
+      <input id="email" type="email" placeholder="Email" autocomplete="username">
+      <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+      <button class="btn primary" id="go">Sign in</button>
+      <div class="err">${esc(msg || '')}</div>
+    </div>`;
+  const go = async () => {
+    const btn = document.getElementById('go');
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    const {data, error} = await db.auth.signInWithPassword({
+      email: document.getElementById('email').value.trim(),
+      password: document.getElementById('pw').value,
+    });
+    if (error){ loginScreen(error.message); return; }
+    session = data.session; start();
+  };
+  document.getElementById('go').onclick = go;
+  document.getElementById('pw').onkeydown = e => { if (e.key === 'Enter') go(); };
+}
+
+async function start(){
+  app.innerHTML = '<div class="empty-state">Loading…</div>';
+  try {
+    await loadAll();
+    if (!myRole){
+      app.innerHTML = `<div class="empty-state">
+        <p>You're signed in as ${esc(session.user.email)}, but that address isn't on the
+        Calendar Club access list yet.</p>
+        <p>Ask Barry to add it.</p>
+        <button class="btn" id="out2">Sign out</button></div>`;
+      document.getElementById('out2').onclick = async () => { await db.auth.signOut(); location.reload(); };
+      return;
+    }
+    filters.year = currentYear(); render();
+  }
+  catch (e){ app.innerHTML = `<div class="empty-state">Could not load the data.<br>${esc(e.message)}</div>`; }
+}
+
+(async () => {
+  if (SUPABASE_URL.includes('YOUR-PROJECT-ID')){
+    app.innerHTML = '<div class="empty-state">Add your Supabase address and key near the top of index.html, then reload.</div>';
+    return;
+  }
+  const {data} = await db.auth.getSession();
+  session = data.session;
+  session ? start() : loginScreen();
+})();
+</script>
+</body>
+</html>
