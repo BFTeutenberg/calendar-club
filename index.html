@@ -674,8 +674,9 @@ function copyPicker(){
       <option value="">Type it in from scratch…</option>
       ${list.map(s => `<option value="${s.id}">${esc(s.name)} — last run ${esc(s.operating_year)}</option>`).join('')}
     </select>
-    <p class="rmeta" style="margin:8px 0 0">Copies the name, city, mall, store type,
-    commission and the people who were on it. Change what's different, then save.</p>
+    <p class="rmeta" style="margin:8px 0 0">Copies the name, city, mall, store type, TM
+    and the people who were on it. Dates and figures stay blank. Change what's
+    different, then save.</p>
   </div>`;
 }
 
@@ -685,12 +686,11 @@ function applyCopy(id){
   const form = document.getElementById('form');
   if (!form) return;
   const set = (k, v) => { if (form.elements[k]) form.elements[k].value = v == null ? '' : v; };
-  if (!src){ ['name','city_id','location_id','type_id','commission_pct'].forEach(k => set(k, '')); return; }
+  if (!src){ ['name','city_id','location_id','type_id','tm_id'].forEach(k => set(k, '')); return; }
   set('name', src.name);
   set('city_id', src.city_id);
   set('location_id', src.location_id);
   set('type_id', src.type_id);
-  set('commission_pct', src.commission_pct);
   set('tm_id', src.tm_id);
 }
 
