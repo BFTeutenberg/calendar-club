@@ -117,10 +117,53 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 .sheetbar .sp{margin-left:auto; display:flex; gap:8px}
 h2.detail{font-size:26px; letter-spacing:-0.025em; margin:16px 0 2px}
 .sub{color:var(--muted); margin-bottom:18px}
-section.grp{margin:22px 0}
+section.grp{
+  margin:14px 0; background:var(--card); border:1px solid var(--line);
+  border-radius:var(--radius); padding:14px 16px;
+}
 section.grp > h3{
-  font-size:13px; font-weight:600; color:var(--muted); padding-bottom:6px;
-  border-bottom:1px solid var(--line); margin-bottom:10px;
+  font-size:12px; font-weight:700; color:var(--muted); letter-spacing:.06em;
+  text-transform:uppercase; padding-bottom:8px;
+  border-bottom:1px solid var(--line); margin-bottom:12px;
+}
+section.grp.now{border-color:var(--accent); box-shadow:inset 4px 0 0 var(--accent)}
+section.grp.now > h3{color:var(--accent)}
+section.grp.later{opacity:.72}
+
+/* what matters right now */
+.phase{display:inline-block; font-size:12px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; padding:3px 10px; border-radius:20px;
+  background:var(--sink); color:var(--muted); margin-bottom:14px}
+.phase.build{background:color-mix(in srgb,var(--amber) 20%,transparent); color:var(--amber)}
+.phase.trading{background:color-mix(in srgb,var(--live) 16%,transparent); color:var(--live)}
+.head{background:var(--sink); border-radius:var(--radius); padding:16px; margin-bottom:14px}
+.head .big{display:flex; flex-wrap:wrap; gap:22px 34px}
+.head .big div{min-width:110px}
+.head .big label{display:block; font-size:11px; font-weight:600; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--muted); margin-bottom:3px}
+.head .big b{font-size:21px; font-weight:700; letter-spacing:-0.02em; line-height:1.15}
+.head .big b small{font-size:13px; font-weight:500; color:var(--muted); display:block}
+.ticks{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px}
+.tick{font-size:12.5px; font-weight:600; padding:3px 10px; border-radius:20px;
+  background:var(--card); border:1px solid var(--line); color:var(--muted)}
+.tick.yes{color:var(--live); border-color:color-mix(in srgb,var(--live) 40%,var(--line))}
+.tick.no{color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+
+/* money, in columns */
+table.money-t{width:100%; border-collapse:collapse}
+table.money-t th{font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--muted); text-align:right; padding:0 0 8px 12px; white-space:nowrap}
+table.money-t th:first-child{text-align:left; padding-left:0}
+table.money-t td{padding:9px 0 9px 12px; border-top:1px solid var(--line); text-align:right;
+  font-size:19px; font-weight:700; letter-spacing:-0.02em; white-space:nowrap}
+table.money-t td:first-child{text-align:left; padding-left:0; font-size:13px;
+  font-weight:600; color:var(--muted); letter-spacing:0}
+table.money-t td.pos{color:var(--live)} table.money-t td.neg{color:var(--accent)}
+table.money-t tr.sub td{font-size:15px; font-weight:600}
+table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
+@media (max-width:520px){
+  table.money-t td{font-size:16px; padding-left:8px}
+  table.money-t th{padding-left:8px}
 }
 .fields{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px 22px}
 .f label{display:block; font-size:12px; color:var(--muted); margin-bottom:3px}
@@ -203,6 +246,7 @@ const money = v => v == null || v === '' ? '' :
   '£' + Number(v).toLocaleString('en-GB', {maximumFractionDigits:0});
 const money2 = v => v == null || v === '' ? '' :
   '£' + Number(v).toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
+const signed = v => v == null ? '' : (v >= 0 ? '+' : '−') + money(Math.abs(v));
 const ukDate = d => !d ? '' :
   new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'});
 
@@ -226,9 +270,37 @@ const canEdit = t => myRole === 'admin' || (myRole === 'editor' && t !== 'member
 const titleOf = (t, r) => t === 'members' ? (r.email || '') : (r.name || '');
 
 const nameOf = (table, id) => { const r = (D[table] || []).find(x => x.id === id); return r ? r.name : ''; };
+const ROLE_ORDER = ['Operator','Builder','Store Staff','TM','Centre Management'];
+const roleRank = r => { const i = ROLE_ORDER.indexOf(r); return i < 0 ? 99 : i; };
 const peopleOn = shopId => (D.shop_people || []).filter(l => l.shop_id === shopId)
   .map(l => ({...l, name: nameOf('people', l.person_id)}))
-  .sort((a,b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
+  .sort((a,b) => roleRank(a.role) - roleRank(b.role) || a.name.localeCompare(b.name));
+
+// Where a store is in its season, which decides what gets shown first.
+function phaseOf(s){
+  const day = 86400000, today = new Date(); today.setHours(0,0,0,0);
+  const on = x => x ? new Date(x + 'T00:00:00') : null;
+  const b = on(s.build_date), o = on(s.opening_date), c = on(s.closedown_date);
+  if (c && today > c) return 'closed';
+  if (o && today >= o) return 'trading';
+  if (b && today >= new Date(b.getTime() - 28 * day)) return 'build';
+  return 'planning';
+}
+const PHASE_LABEL = {planning:'Planning', build:'Building', trading:'Trading', closed:'Closed'};
+function daysUntil(d){
+  if (!d) return null;
+  const day = 86400000, today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((new Date(d + 'T00:00:00') - today) / day);
+}
+function whenLabel(d){
+  const n = daysUntil(d);
+  if (n == null) return '';
+  if (n === 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n > 0) return 'in ' + n + ' days';
+  if (n === -1) return 'yesterday';
+  return Math.abs(n) + ' days ago';
+}
 
 function currentYear(){
   const years = [...new Set((D.shops || []).map(s => s.operating_year))].sort();
@@ -294,7 +366,8 @@ const LOCATION_FIELDS = [
   ['Notes', [['notes','Notes','textarea']]],
 ];
 const TYPE_FIELDS = [['Store type', [
-  ['name','Type name','text'], ['builders_required','Builders required','number'],
+  ['name','Type name','text'], ['active','Still in use','bool'],
+  ['builders_required','Builders required','number'],
   ['grid_pallet','Includes 8ft grid pallet','bool'],
   ['specialised_tools','Specialised tools','text'], ['notes','Notes','textarea'],
 ]]];
@@ -307,7 +380,7 @@ const MEMBER_FIELDS = [['Access', [
 const TABLES = {
   shops:      {label:'Stores',    fields:SHOP_FIELDS,     single:'Store'},
   people:     {label:'People',    fields:PERSON_FIELDS,   single:'Person'},
-  locations:  {label:'Places',    fields:LOCATION_FIELDS, single:'Place'},
+  locations:  {label:'Malls',     fields:LOCATION_FIELDS, single:'Mall'},
   store_types:{label:'Types',     fields:TYPE_FIELDS,     single:'Store type'},
   cities:     {label:'Cities',    fields:CITY_FIELDS,     single:'City'},
   members:    {label:'Access',    fields:MEMBER_FIELDS,   single:'Person with access', adminOnly:true},
@@ -404,7 +477,7 @@ function wireList(){
   const st = document.getElementById('status');
   if (st) st.onchange = () => { filters.status = st.value; drawList(); };
   const nb = document.getElementById('new');
-  if (nb) nb.onclick = () => { openRec = {table:tab, id:null}; editing = true; drawSheet(); };
+  if (nb) nb.onclick = () => { copyFrom = null; openRec = {table:tab, id:null}; editing = true; drawSheet(); };
   drawList();
 }
 
@@ -457,20 +530,34 @@ function tradingWindow(s){
 
 function shopRow(s){
   const d = difference(s), v = variation(s), days = daysOpen(s);
-  const cls = s.store_status === 'Open and Trading' ? 'live'
-            : s.store_status === 'Active' ? 'soon' : '';
-  const ops = peopleOn(s.id).filter(p => p.role === 'Operator').map(p => p.name);
+  const phase = phaseOf(s);
+  const cls = phase === 'trading' ? 'live' : phase === 'build' ? 'soon' : '';
+  const on = peopleOn(s.id);
+  const ops = on.filter(p => p.role === 'Operator').map(p => p.name);
+  const builders = on.filter(p => p.role === 'Builder');
+  const typeRec = D.store_types.find(x => x.id === s.type_id);
+  const need = typeRec ? typeRec.builders_required : null;
+
+  // Before opening it's the build that matters; after it, the takings.
+  const foot = (phase === 'planning' || phase === 'build')
+    ? `${s.build_date ? `<span><b>Build ${esc(ukDate(s.build_date))}</b>${
+          whenLabel(s.build_date) ? ' · ' + esc(whenLabel(s.build_date)) : ''}</span>`
+       : '<span>No build date</span>'}
+       ${need ? `<span class="${builders.length >= need ? 'money' : ''}">${
+          builders.length} of ${need} builders</span>` : ''}`
+    : `${days ? `<span>${days} days open</span>` : ''}
+       ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
+          d != null ? ` <span class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '−'}${money(Math.abs(d))}${
+            v != null ? ` (${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%)` : ''}</span>` : ''}</span>` : ''}`;
+
   return `
     <button class="row" data-id="${s.id}">
       <h3>${esc(s.name)}</h3>
       <div class="rmeta">${esc([nameOf('store_types', s.type_id), s.operating_year,
         ops.length ? ops.join(' & ') : 'No operator'].filter(Boolean).join(' · '))}</div>
       <div class="rfoot">
-        <span class="tag ${cls}">${esc(s.store_status || 'No status')}</span>
-        ${days ? `<span>${days} days open</span>` : ''}
-        ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
-          d != null ? ` <span class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '−'}${money(Math.abs(d))}${
-            v != null ? ` (${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%)` : ''}</span>` : ''}</span>` : ''}
+        <span class="tag ${cls}">${esc(s.store_status || PHASE_LABEL[phase])}</span>
+        ${foot}
       </div>
       ${tradingWindow(s)}
     </button>`;
@@ -485,7 +572,8 @@ function plainRow(t, r){
   } else if (t === 'locations'){
     meta = [nameOf('cities', r.city_id), r.postcode].filter(Boolean).join(' · ');
   } else if (t === 'store_types'){
-    meta = [r.builders_required ? r.builders_required + ' builders' : '',
+    meta = [r.active === false ? 'Retired' : '',
+            r.builders_required ? r.builders_required + ' builders' : '',
             r.grid_pallet ? '8ft grid pallet' : '', r.specialised_tools].filter(Boolean).join(' · ');
   } else if (t === 'cities'){
     meta = `${D.shops.filter(s => s.city_id === r.id).length} stores`;
@@ -533,16 +621,20 @@ function drawSheet(){
     <div class="wrap">
       <h2 class="detail">${esc(title)}</h2>
       ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}
+      ${t === 'shops' && !openRec.id ? copyPicker() : ''}
       <form id="form" autocomplete="off">
-        ${t === 'shops' && openRec.id ? calcBlock(rec) : ''}
-        ${TABLES[t].fields.map(([grp, fs]) => `
-          <section class="grp"><h3>${esc(grp)}</h3><div class="fields">
-            ${fs.map(f => fieldHtml(f, rec)).join('')}
-          </div></section>`).join('')}
+        ${t === 'shops' && openRec.id ? headBlock(rec, phaseOf(rec)) : ''}
+        ${TABLES[t].fields.map(([grp, fs]) =>
+          sectionHtml(t, grp, fs, rec, t === 'shops' && openRec.id ? phaseOf(rec) : null)).join('')}
         ${t === 'shops' && openRec.id ? peopleBlock(rec) : ''}
         ${t === 'people' && openRec.id ? storesBlock(rec) : ''}
       </form>
-      ${openRec.id && mayEdit ? `<button class="btn" id="del" style="margin-top:26px; color:var(--accent)">Delete this ${TABLES[t].single.toLowerCase()}</button>` : ''}
+      ${openRec.id && mayEdit && t !== 'store_types'
+        ? `<button class="btn" id="del" style="margin-top:26px; color:var(--accent)">Delete this ${TABLES[t].single.toLowerCase()}</button>` : ''}
+      ${openRec.id && mayEdit && t === 'store_types'
+        ? `<p class="rmeta" style="margin-top:22px">Store types aren't deleted. Set
+           <b>Still in use</b> to No to keep it out of the dropdown while leaving it
+           on the stores that already have it.</p>` : ''}
       <div class="err" id="err"></div>
     </div>`;
 
@@ -563,6 +655,43 @@ function drawSheet(){
   });
   const addBtn = el.querySelector('#addlink');
   if (addBtn) addBtn.onclick = () => link(rec.id);
+  const cp = el.querySelector('#copyfrom');
+  if (cp) cp.onchange = () => applyCopy(Number(cp.value) || null);
+}
+
+let copyFrom = null;   // the store a new one is being based on
+
+function copyPicker(){
+  const latest = new Map();
+  [...D.shops].sort((a,b) => (a.operating_year || '').localeCompare(b.operating_year || ''))
+    .forEach(s => latest.set(s.name, s));
+  const list = [...latest.values()].sort((a,b) => a.name.localeCompare(b.name));
+  return `<div class="head" style="margin-bottom:18px">
+    <label style="display:block; font-size:11px; font-weight:600; letter-spacing:.05em;
+      text-transform:uppercase; color:var(--muted); margin-bottom:6px">Start from a previous store</label>
+    <select id="copyfrom" style="width:100%; max-width:420px; padding:9px 11px;
+      border:1px solid var(--line); border-radius:8px; background:var(--card)">
+      <option value="">Type it in from scratch…</option>
+      ${list.map(s => `<option value="${s.id}">${esc(s.name)} — last run ${esc(s.operating_year)}</option>`).join('')}
+    </select>
+    <p class="rmeta" style="margin:8px 0 0">Copies the name, city, mall, store type,
+    commission and the people who were on it. Change what's different, then save.</p>
+  </div>`;
+}
+
+function applyCopy(id){
+  copyFrom = id || null;
+  const src = D.shops.find(x => x.id === id);
+  const form = document.getElementById('form');
+  if (!form) return;
+  const set = (k, v) => { if (form.elements[k]) form.elements[k].value = v == null ? '' : v; };
+  if (!src){ ['name','city_id','location_id','type_id','commission_pct'].forEach(k => set(k, '')); return; }
+  set('name', src.name);
+  set('city_id', src.city_id);
+  set('location_id', src.location_id);
+  set('type_id', src.type_id);
+  set('commission_pct', src.commission_pct);
+  set('tm_id', src.tm_id);
 }
 
 function closeSheet(){
@@ -597,8 +726,10 @@ function fieldHtml([k, label, type], rec){
   if (type.startsWith('ref:')){
     const src = type.slice(4);
     body = `<select name="${k}"><option value="">—</option>${
-      [...D[src]].sort((a,b) => a.name.localeCompare(b.name)).map(o =>
-        `<option value="${o.id}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
+      [...D[src]].filter(o => o.active !== false || o.id === v)
+        .sort((a,b) => a.name.localeCompare(b.name)).map(o =>
+        `<option value="${o.id}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}${
+          o.active === false ? ' (retired)' : ''}</option>`).join('')}</select>`;
   } else if (type.startsWith('opt:')){
     body = `<select name="${k}">${type.slice(4).split('|').map(o =>
       `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(o || '—')}</option>`).join('')}</select>`;
@@ -620,19 +751,102 @@ function fieldHtml([k, label, type], rec){
   return `<div class="f${wide}"><label>${esc(label)}</label>${body}</div>`;
 }
 
-function calcBlock(s){
-  const days = daysOpen(s), d = difference(s), v = variation(s);
-  const bits = [
-    ['Days open', days ?? '—'], ['Trading period', weeksLabel(days) || '—'],
-    ['Difference', d == null ? '—' : (d >= 0 ? '+' : '−') + money2(Math.abs(d))],
-    ['Variation', v == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1) + '%'],
-    ['Budget commission', money2(budgetAmt(s)) || '—'],
-    ['Actual commission', money2(actualAmt(s)) || '—'],
-  ];
-  return `<section class="grp"><h3>Worked out from the figures below</h3>
-    <div class="calc"><div class="fields">${bits.map(([l, x]) =>
-      `<div class="f"><label>${l}</label><div class="val">${esc(x)}</div></div>`).join('')}</div></div>
-    ${tradingWindow(s)}</section>`;
+// What matters right now, depending on where the store is in its season.
+function headBlock(s, phase){
+  const on = peopleOn(s.id);
+  const ops = on.filter(p => p.role === 'Operator').map(p => p.name);
+  const builders = on.filter(p => p.role === 'Builder').map(p => p.name);
+  const typeRec = D.store_types.find(x => x.id === s.type_id);
+  const need = typeRec ? typeRec.builders_required : null;
+  const hhmm = t => t ? String(t).slice(0,5) : '';
+  const item = (l, v, sub) => !v ? '' :
+    `<div><label>${esc(l)}</label><b>${esc(v)}${sub ? `<small>${esc(sub)}</small>` : ''}</b></div>`;
+
+  let big;
+  if (phase === 'trading' || phase === 'closed'){
+    big = [
+      item('Operator', ops.join(' & ') || 'None'),
+      item('Opened', ukDate(s.opening_date)),
+      item(phase === 'closed' ? 'Closed' : 'Closes', ukDate(s.closedown_date),
+           phase === 'trading' ? whenLabel(s.closedown_date) : ''),
+      item('Budget', money(s.budget)),
+      item('Actual', money(s.actual), variation(s) == null ? '' :
+        (variation(s) >= 0 ? '+' : '−') + Math.abs(variation(s)).toFixed(1) + '% on budget'),
+    ];
+  } else {
+    big = [
+      item('Build', ukDate(s.build_date), whenLabel(s.build_date)),
+      item('On the day', hhmm(s.build_start_time),
+           s.pallet_delivery_time ? 'pallets ' + hhmm(s.pallet_delivery_time) : ''),
+      item('Store type', nameOf('store_types', s.type_id),
+           need ? need + (need === 1 ? ' builder needed' : ' builders needed') : ''),
+      item('Operator', ops.join(' & ') || 'None yet'),
+      item('Builders', builders.join(', ') || 'None yet',
+           need ? builders.length + ' of ' + need + ' booked' : ''),
+      item('Opens', ukDate(s.opening_date), whenLabel(s.opening_date)),
+    ];
+  }
+
+  const tick = (l, good, text) =>
+    `<span class="tick ${good === true ? 'yes' : good === false ? 'no' : ''}">${esc(l)}${
+      text ? ': ' + esc(text) : ''}</span>`;
+  const ready = (phase === 'planning' || phase === 'build') ? `<div class="ticks">
+      ${tick('Delivery', s.delivery_booked === 'Confirmed' ? true
+             : s.delivery_booked ? false : null, s.delivery_booked || 'not booked')}
+      ${tick('RAMS & SIPS', s.rams_sips_sent === true ? true : s.rams_sips_sent === false ? false : null,
+             s.rams_sips_sent == null ? 'unknown' : s.rams_sips_sent ? 'sent' : 'not sent')}
+      ${tick('Head office', s.build_signoff === true ? true : s.build_signoff === false ? false : null,
+             s.build_signoff == null ? 'unknown' : s.build_signoff ? 'signed off' : 'not signed off')}
+      ${s.permit_required ? tick('Permit needed', null) : ''}
+      ${s.tm_attending ? tick('TM attending', null) : ''}
+    </div>` : '';
+
+  return `<div class="phase ${phase}">${PHASE_LABEL[phase]}</div>
+    <div class="head"><div class="big">${big.join('')}</div>${ready}</div>
+    ${tradingWindow(s)}`;
+}
+
+// Budget against actual, in columns.
+function moneyTable(s){
+  const cell = (v, dp2) => v == null ? '<td class="none">—</td>'
+    : `<td>${dp2 ? money2(v) : money(v)}</td>`;
+  const row = (label, b, a, opt = {}) => {
+    const d = (b == null || a == null) ? null : a - b;
+    return `<tr class="${opt.sub ? 'sub' : ''}"><td>${esc(label)}</td>
+      ${cell(b, opt.dp2)}${cell(a, opt.dp2)}
+      <td class="${d == null ? 'none' : d >= 0 ? 'pos' : 'neg'}">${
+        d == null ? '—' : (d >= 0 ? '+' : '−') + (opt.dp2 ? money2(Math.abs(d)) : money(Math.abs(d)))
+      }</td></tr>`;
+  };
+  const days = daysOpen(s), v = variation(s);
+  return `<table class="money-t">
+      <thead><tr><th></th><th>Budget</th><th>Actual</th><th>Difference</th></tr></thead>
+      <tbody>
+        ${row('Sales', s.budget, s.actual)}
+        ${row('Dated', s.dated_budget, s.dated_actual, {sub:true})}
+        ${row('Gift', s.gift_budget, s.gift_actual, {sub:true})}
+        ${row('Commission' + (s.commission_pct != null ? ' at ' + s.commission_pct + '%' : ''),
+              budgetAmt(s), actualAmt(s), {dp2:true})}
+      </tbody>
+    </table>
+    <div class="fields" style="margin-top:14px">
+      ${v == null ? '' : `<div class="f"><label>Variation on budget</label><div class="val">${
+        (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1)}%</div></div>`}
+      ${s.pct_two_plus == null ? '' : `<div class="f"><label>Two plus</label><div class="val">${s.pct_two_plus}%</div></div>`}
+      ${days == null ? '' : `<div class="f"><label>Days open</label><div class="val">${days} · ${esc(weeksLabel(days))}</div></div>`}
+    </div>`;
+}
+
+// Which group of fields is the one to look at now.
+const FOCUS = {planning:['Where','Status'], build:['Dates','Build day'],
+               trading:['Money'], closed:['Money']};
+
+function sectionHtml(t, grp, fs, rec, phase){
+  const now = t === 'shops' && openRec.id && (FOCUS[phase] || []).includes(grp);
+  const inner = (!editing && t === 'shops' && grp === 'Money' && openRec.id)
+    ? moneyTable(rec)
+    : `<div class="fields">${fs.map(f => fieldHtml(f, rec)).join('')}</div>`;
+  return `<section class="grp${now ? ' now' : ''}"><h3>${esc(grp)}</h3>${inner}</section>`;
 }
 
 function peopleBlock(s){
@@ -706,6 +920,15 @@ async function save(t, rec){
       const {data, error} = await db.from(TBL[t]).insert(patch).select().single();
       if (error) throw error;
       D[t].push(data); openRec.id = data.id;
+      if (t === 'shops' && copyFrom){
+        const rows = (D.shop_people || []).filter(l => l.shop_id === copyFrom)
+          .map(l => ({shop_id:data.id, person_id:l.person_id, role:l.role}));
+        if (rows.length){
+          const got = await db.from(TBL.shop_people).insert(rows).select();
+          if (!got.error && got.data) D.shop_people.push(...got.data);
+        }
+        copyFrom = null;
+      }
     }
     editing = false; drawSheet(); drawList(); toast('Saved');
   } catch (e){
