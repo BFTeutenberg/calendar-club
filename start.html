@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calendar Club — getting started</title>
+<meta name="theme-color" content="#A81B2E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#F5F6F4;--card:#FFFFFF;--ink:#151D22;--muted:#66736D;--line:#DEE3E0;
+  --accent:#A81B2E;--sink:#EEF0ED;--radius:10px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0E1417;--card:#161E22;--ink:#E7EDE9;--muted:#8B9992;--line:#283338;
+  --accent:#E4596B;--sink:#1D262B}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-size:16.5px;line-height:1.55;
+  font-family:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.wrap{max-width:720px;margin:0 auto;padding:34px 20px 80px}
+h1{font-size:34px;letter-spacing:-0.03em;margin:0 0 6px}
+h1 em{font-style:normal;color:var(--accent)}
+.lede{color:var(--muted);margin:0 0 26px;font-size:17px}
+h2{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+section{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 20px;margin-bottom:16px}
+p{margin:0 0 12px}p:last-child{margin-bottom:0}
+ol{margin:0 0 12px;padding-left:22px}li{margin-bottom:7px}
+code{background:var(--sink);padding:2px 7px;border-radius:5px;font-size:15px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+a{color:var(--accent)}
+.addr{display:block;background:var(--sink);border-radius:8px;padding:12px 14px;margin-bottom:10px;
+  text-decoration:none;color:var(--ink);font-weight:600}
+.addr small{display:block;font-size:11.5px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:3px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tabs button{padding:9px 16px;border-radius:22px;border:1px solid var(--line);
+  background:var(--card);color:var(--muted);font:inherit;font-weight:600;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.pane{display:none}.pane.on{display:block}
+.note{background:var(--sink);border-radius:8px;padding:12px 14px;font-size:15px;color:var(--muted)}
+.print{margin-top:26px;padding:10px 18px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--card);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+@media print{
+  body{background:#fff}.tabs,.print{display:none}
+  .pane{display:block!important;page-break-inside:avoid}
+  .pane::before{content:attr(data-name);display:block;font-weight:700;margin-bottom:8px}
+  section{border:0;padding:0 0 14px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Calendar <em>Club</em></h1>
+<p class="lede">Everything you need to get signed in and set up. Takes about two minutes.</p>
+
+<section>
+  <h2>The two apps</h2>
+  <!-- EDIT THESE TWO LINES: put your real addresses in both the href and the text -->
+  <a class="addr" id="cc" href="https://BFTeutenberg.github.io/calendar-club/">
+    <small>Calendar Club</small>https://BFTeutenberg.github.io/calendar-club/</a>
+  <a class="addr" id="contacts" href="https://BFTeutenberg.github.io/contacts/">
+    <small>Contacts</small>https://BFTeutenberg.github.io/contacts/</a>
+  <p class="note">Your email address and password are sent to you separately. The same
+  pair works on both apps. You don't need to create an account — one has been made
+  for you.</p>
+</section>
+
+<section>
+  <h2>1. Sign in</h2>
+  <p>Open the Calendar Club address above, type in your email and password, and tap
+  <b>Sign in</b>. You'll land on the stores list for the current season.</p>
+  <p>If it says your address isn't on the access list, your login is fine but you
+  haven't been added yet. Message Barry and he'll do it in seconds.</p>
+</section>
+
+<section>
+  <h2>2. Install it</h2>
+  <div class="tabs"><button data-k="iphone" aria-selected="false">iPhone</button><button data-k="android" aria-selected="false">Android</button><button data-k="windows" aria-selected="false">Windows</button><button data-k="mac" aria-selected="false">Mac</button></div>
+  <div class="pane" id="p-iphone" data-name="iPhone"><p><b>Put it on your home screen</b></p><ol>
+<li>With the app open in <b>Safari</b>, tap the <b>share button</b> at the bottom of the screen — the square with an arrow coming out of the top.</li>
+<li>Scroll down the list and tap <b>Add to Home Screen</b>.</li>
+<li>Tap <b>Add</b> in the top right.</li>
+</ol>
+<p>You'll get an icon on your home screen. Tapping it opens the app full screen with no address bar, like any other app.</p>
+<p>This only works in Safari. If you opened the link in Chrome you won't see the option — copy the address into Safari first.</p></div>
+  <div class="pane" id="p-android" data-name="Android"><p><b>Put it on your home screen</b></p><ol>
+<li>With the app open in <b>Chrome</b>, tap the <b>three dots</b> at the top right.</li>
+<li>Tap <b>Install app</b>, or <b>Add to Home screen</b> if that's what yours says.</li>
+<li>Confirm.</li>
+</ol>
+<p>You'll get an icon in your app drawer and on your home screen. It opens full screen with no address bar.</p></div>
+  <div class="pane" id="p-windows" data-name="Windows"><p><b>Put it on your desktop</b></p><ol>
+<li>With the app open in <b>Chrome</b> or <b>Edge</b>, look at the right-hand end of the address bar for the <b>install icon</b> — a small screen with a downward arrow in Chrome, or a screen with a plus in Edge.</li>
+<li>Click it, then click <b>Install</b>.</li>
+</ol>
+<p>If you can't see the icon, use the menu instead. In Chrome that's the three dots → <b>Cast, save and share</b> → <b>Install page as app</b>. In Edge it's the three dots → <b>Apps</b> → <b>Install this site as an app</b>.</p>
+<p>It opens in its own window with no address bar and appears in your Start menu. Right-click it there to <b>Pin to taskbar</b> if you want it permanently to hand.</p></div>
+  <div class="pane" id="p-mac" data-name="Mac"><p><b>Put it in your dock</b></p><p><b>In Chrome or Edge:</b> look at the right-hand end of the address bar for the <b>install icon</b> — a small screen with a downward arrow. Click it, then <b>Install</b>.</p>
+<p><b>In Safari:</b> go to <b>File</b> → <b>Add to Dock</b>, then click <b>Add</b>.</p>
+<p>Either way it opens in its own window with no address bar. Drag it from Applications or Launchpad into the dock to keep it handy.</p></div>
+</section>
+
+<section>
+  <h2>3. Do the same for Contacts</h2>
+  <p>Open the Contacts address and repeat both steps. You end up with two separate
+  icons, one for each app.</p>
+</section>
+
+<section>
+  <h2>Finding your way round</h2>
+  <p>There's a <b>Help</b> tab along the top of Calendar Club covering searching, what
+  the colours and dates on a store mean, how the figures work and how to add things.
+  Worth two minutes when you first sign in.</p>
+  <p>A few things that catch people out: the app opens on the <b>current season</b>, so
+  change the year dropdown to see earlier ones. The <b>area</b> dropdown narrows
+  everything to one TM's stores and remembers your choice. Search matches people as
+  well as stores, so a builder's name finds every store they've worked on. And you can
+  tap an operator's phone number to ring them straight from the store screen.</p>
+</section>
+
+<section>
+  <h2>If something isn't working</h2>
+  <p><b>Nothing appears after signing in</b> — your email hasn't been added to the
+  access list yet. Ask Barry.</p>
+  <p><b>You can see things but can't change them</b> — your access is view only, which
+  is deliberate for most people. Ask Barry if you need more.</p>
+  <p><b>It looks out of date or behaves oddly</b> — sign out and back in.</p>
+  <p><b>Forgotten password</b> — Barry can set you a new one.</p>
+</section>
+
+<button class="print" onclick="window.print()">Print or save as PDF</button>
+</div>
+
+<script>
+// Show the reader's own device first, but let them switch.
+const ua = navigator.userAgent;
+const guess = /iPhone|iPad|iPod/.test(ua) ? 'iphone'
+            : /Android/.test(ua) ? 'android'
+            : /Macintosh|Mac OS X/.test(ua) ? 'mac' : 'windows';
+function show(k){
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'p-' + k));
+  document.querySelectorAll('.tabs button').forEach(b =>
+    b.setAttribute('aria-selected', b.dataset.k === k));
+}
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => show(b.dataset.k));
+show(guess);
+</script>
+</body>
+</html>
