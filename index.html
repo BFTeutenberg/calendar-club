@@ -266,7 +266,28 @@ const TBL = {                  // short name in the app -> table in Supabase
 let D = {};                    // every table, held in memory
 let myRole = null;             // admin, editor or viewer
 let tab = 'shops';
-let filters = { q:'', year:'', status:'', tm:'' };
+let filters = { q:'', year:'', status:'', tm:'', sort:'build' };
+
+const SORTS = {build:'Build date', tm:'TM', name:'Store name', status:'Status'};
+const STATUS_RANK = ['Open and Trading','Active','Pending','Reserve'];
+
+function sortShops(list){
+  const byName = (a,b) => (a.name || '').localeCompare(b.name || '');
+  const byBuild = (a,b) => (a.build_date || '9999').localeCompare(b.build_date || '9999');
+  const rank = s => { const i = STATUS_RANK.indexOf(s.store_status); return i < 0 ? 99 : i; };
+  const tmName = s => nameOf('people', s.tm_id) || 'zzzz';
+  if (filters.sort === 'tm')     return list.sort((a,b) => tmName(a).localeCompare(tmName(b)) || byBuild(a,b) || byName(a,b));
+  if (filters.sort === 'name')   return list.sort((a,b) => byName(a,b) || byBuild(a,b));
+  if (filters.sort === 'status') return list.sort((a,b) => rank(a) - rank(b) || byBuild(a,b) || byName(a,b));
+  return list.sort((a,b) => byBuild(a,b) || byName(a,b));
+}
+
+function rememberSort(v){
+  try { v ? localStorage.setItem('cc_sort', v) : localStorage.removeItem('cc_sort'); } catch (e) {}
+}
+function recallSort(){
+  try { return localStorage.getItem('cc_sort') || ''; } catch (e) { return ''; }
+}
 
 function rememberTM(v){
   try { localStorage.setItem('cc_tm_filter', v || ''); } catch (e) {}
@@ -516,6 +537,13 @@ function shopsScreen(){
         ${['Reserve','Pending','Active','Open and Trading']
           .map(s => `<option ${s===filters.status?'selected':''}>${s}</option>`).join('')}
       </select>
+      <select class="filter" id="sort">
+        ${Object.entries(SORTS).map(([k,v]) =>
+          `<option value="${k}" ${k===filters.sort?'selected':''}>Sort: ${v}</option>`).join('')}
+      </select>
+      <label class="rolechk" title="Open on this sort next time">
+        <input type="checkbox" id="sortdef" ${recallSort() === filters.sort ? 'checked' : ''}> Default
+      </label>
       ${tms.length ? `<select class="filter" id="tm">
         <option value="">All areas</option>
         ${tms.map(p => `<option value="${p.id}" ${String(p.id)===String(filters.tm)?'selected':''}>${
@@ -541,7 +569,10 @@ function helpScreen(){
       attached — so typing a builder's name finds every store they worked on. Several
       words all have to match, so <i>helen derby</i> finds Derby stores Helen was on.</p>
       <p>The <b>area</b> dropdown sticks. Pick your own patch once and it's still there
-      next time you sign in on that device.</p>`)}
+      next time you sign in on that device.</p>
+      <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
+      date is the default. Tick <b>Default</b> beside it to open on a different order
+      next time.</p>`)}
 
     ${q('Reading a store', `
       <p>The block at the top changes with the season. Before opening it shows the
@@ -607,6 +638,11 @@ function helpScreen(){
       nothing the second time, and running next month's version only brings in what
       has moved. Empty cells are left alone — an import never wipes something you have
       filled in here.</p>
+      <p>It also remembers what the spreadsheet said last time. If nobody has touched a
+      field here since, a newer spreadsheet simply wins. If somebody <i>has</i> changed
+      it here, the import stops and asks: both values are shown side by side under
+      <b>Needs your say</b>, and yours is kept unless you tick the box. So an old
+      spreadsheet can't quietly undo your work.</p>
       <p>Stores with no build or opening date are skipped, because there's no way to
       tell which season they belong to. Store types and operators the report mentions
       that aren't here yet are created for you.</p>`)}
@@ -671,6 +707,14 @@ function seasonOf(ymd){
 }
 const norm = t => String(t == null ? '' : t).trim();
 const key = t => norm(t).toLowerCase();
+// Compare a spreadsheet value with a stored one without tripping over types.
+function same(field, a, b){
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  if (field.endsWith('_id') || field === 'budget') return Number(a) === Number(b);
+  if (field.endsWith('_time')) return String(a).slice(0,5) === String(b).slice(0,5);
+  return key(a) === key(b);
+}
 
 function cityFor(storeName){
   const n = key(storeName);
@@ -703,8 +747,8 @@ function buildPlan(sheetName, tmCode){
   const rows = rowsOf(sheetName);
   if (!rows) throw new Error('That sheet has no "Store Number" heading, so it isn\'t a store list.');
 
-  const plan = {creates:[], updates:[], same:0, newTypes:new Set(), newPeople:new Set(),
-                noYear:[], sheet:sheetName};
+  const plan = {creates:[], updates:[], same:0, conflicted:0, rebase:[],
+                newTypes:new Set(), newPeople:new Set(), noYear:[], sheet:sheetName};
 
   rows.forEach(row => {
     const tm = norm(pick(row, IMP.tm));
@@ -743,35 +787,45 @@ function buildPlan(sheetName, tmCode){
       budget: impNum(pick(row, IMP.budget)),
     };
 
+    const snapshot = {...want, __operator: opName || null};
     const existing = D.shops.find(sh =>
       (number && sh.store_number === number && sh.operating_year === year) ||
       (key(sh.name) === key(name) && sh.operating_year === year));
 
     if (!existing){
-      plan.creates.push({want, typeName: type ? null : wanted, opName, row});
+      plan.creates.push({want, snapshot, typeName: type ? null : wanted, opName, row});
       return;
     }
 
-    // Only fields the sheet actually has a value for, and only where different.
-    const changes = {};
+    // Three way: what the sheet says now, what it said last time, and what's here.
+    // If nobody has touched a field since the last import, the sheet just wins.
+    // If somebody has, we stop and ask.
+    const base = existing.imported || null;
+    const safe = {}, conflicts = [];
     Object.entries(want).forEach(([k, v]) => {
       if (v == null || v === '') return;
       const now = existing[k];
-      if (k.endsWith('_id') || k === 'budget'){ if (Number(now) !== Number(v)) changes[k] = v; }
-      else if (norm(now) !== norm(v)) changes[k] = v;
+      if (same(k, now, v)) return;                       // already matches
+      if (base && k in base && same(k, base[k], now)) { safe[k] = v; return; }
+      conflicts.push({k, mine: now, theirs: v, take: false});
     });
 
     const currentOps = peopleOn(existing.id).filter(l => l.role === 'Operator');
-    const opChange = opName && !currentOps.some(l => key(l.name) === key(opName))
-      ? {from: currentOps.map(l => l.name).join(' & ') || 'nobody', to: opName,
-         links: currentOps.map(l => l.id)}
-      : null;
+    const opNow = currentOps.map(l => l.name).join(' & ');
+    let opChange = null, opConflict = null;
+    if (opName && !currentOps.some(l => key(l.name) === key(opName))){
+      const info = {from: opNow || 'nobody', to: opName, links: currentOps.map(l => l.id)};
+      if (base && '__operator' in base && key(base.__operator) === key(opNow)) opChange = info;
+      else conflicts.push({k:'__operator', mine: opNow || null, theirs: opName, take:false, op: info});
+    }
 
-    if (Object.keys(changes).length || opChange){
-      plan.updates.push({id: existing.id, name: existing.name, changes, opChange,
-                         typeName: type ? null : wanted, opName});
+    if (Object.keys(safe).length || conflicts.length || opChange){
+      plan.updates.push({id: existing.id, name: existing.name, safe, conflicts, opChange,
+                         opConflict, snapshot, typeName: type ? null : wanted, opName});
+      if (conflicts.length) plan.conflicted++;
     } else {
       plan.same++;
+      plan.rebase.push({id: existing.id, snapshot});     // sheet unchanged, refresh baseline
     }
   });
   return plan;
@@ -880,7 +934,9 @@ function drawPlan(){
         <div><label>Updated</label><b>${p.updates.length}</b></div>
         <div><label>Already correct</label><b>${p.same}</b></div>
       </div>
-      ${p.newTypes.size || p.newPeople.size || p.noYear.length ? `<div class="ticks">
+      ${p.conflicted || p.newTypes.size || p.newPeople.size || p.noYear.length ? `<div class="ticks">
+        ${p.conflicted ? `<span class="tick no">${p.conflicted} need${
+          p.conflicted === 1 ? 's' : ''} your say</span>` : ''}
         ${p.newTypes.size ? `<span class="tick">${p.newTypes.size} new store type${
           p.newTypes.size === 1 ? '' : 's'}: ${esc([...p.newTypes].join(', '))}</span>` : ''}
         ${p.newPeople.size ? `<span class="tick">${p.newPeople.size} new operator${
@@ -894,6 +950,26 @@ function drawPlan(){
       an import never wipes something you've filled in here.</p>`}
     </section>
 
+    ${!p.conflicted ? '' : `<section class="grp now"><h3>Needs your say (${p.conflicted})</h3>
+      <p style="margin-bottom:12px">These were changed here after the last import, and the
+      spreadsheet now says something different. Yours is kept unless you tick the box.</p>
+      <div class="addp" style="margin-bottom:14px">
+        <button type="button" class="btn" id="takeall">Take all from the spreadsheet</button>
+        <button type="button" class="btn" id="keepall">Keep all of mine</button>
+      </div>
+      ${p.updates.filter(u => u.conflicts.length).map((u, ui) => `
+        <div style="margin-bottom:16px">
+          <div style="font-weight:600; margin-bottom:6px">${esc(u.name)}</div>
+          ${u.conflicts.map((c, ci) => `
+            <label class="rolechk" style="display:flex; width:100%; margin-bottom:6px; border-radius:8px">
+              <input type="checkbox" class="cflict" data-u="${ui}" data-c="${ci}" ${c.take ? 'checked' : ''}>
+              <span><b>${esc(FIELD_LABEL[c.k] || 'Operator')}</b> —
+              here: ${esc(showValue(c.k, c.mine) || 'empty')} ·
+              spreadsheet: ${esc(showValue(c.k, c.theirs))}</span>
+            </label>`).join('')}
+        </div>`).join('')}
+    </section>`}
+
     ${!p.creates.length ? '' : `<section class="grp"><h3>New stores (${p.creates.length})</h3>
       <div class="people-list">${p.creates.map(c => `<div class="plink">
         <span>${esc(c.want.name)}</span>
@@ -901,11 +977,15 @@ function drawPlan(){
           c.opName || 'no operator'].filter(Boolean).join(' · '))}</span></div>`).join('')}</div>
     </section>`}
 
-    ${!p.updates.length ? '' : `<section class="grp"><h3>Changes to existing stores (${p.updates.length})</h3>
-      <div class="people-list">${p.updates.map(u => `<div class="plink" style="display:block">
+    ${!p.updates.some(u => Object.keys(u.safe).length || u.opChange) ? '' :
+      `<section class="grp"><h3>Straightforward updates</h3>
+      <p class="rmeta" style="margin-bottom:10px">Nobody has touched these here since the
+      last import, so the spreadsheet is simply newer.</p>
+      <div class="people-list">${p.updates.filter(u => Object.keys(u.safe).length || u.opChange)
+        .map(u => `<div class="plink" style="display:block">
         <div style="font-weight:600">${esc(u.name)}</div>
         <div class="rmeta">${[
-          ...Object.entries(u.changes).map(([k, v]) =>
+          ...Object.entries(u.safe).map(([k, v]) =>
             `${esc(FIELD_LABEL[k] || k)} → ${esc(showValue(k, v))}`),
           u.opChange ? `Operator ${esc(u.opChange.from)} → ${esc(u.opChange.to)}` : '',
         ].filter(Boolean).join(' · ')}</div></div>`).join('')}</div>
@@ -916,6 +996,16 @@ function drawPlan(){
       they belong to: ${esc(p.noYear.slice(0,12).join(', '))}${
         p.noYear.length > 12 ? ' and others' : ''}.</p></section>`}`;
 
+  box.querySelectorAll('.cflict').forEach(cb => cb.onchange = () => {
+    const u = impPlan.updates.filter(x => x.conflicts.length)[Number(cb.dataset.u)];
+    u.conflicts[Number(cb.dataset.c)].take = cb.checked;
+  });
+  const setAll = v => {
+    impPlan.updates.forEach(u => u.conflicts.forEach(c => c.take = v));
+    box.querySelectorAll('.cflict').forEach(cb => cb.checked = v);
+  };
+  const ta = document.getElementById('takeall'); if (ta) ta.onclick = () => setAll(true);
+  const ka = document.getElementById('keepall'); if (ka) ka.onclick = () => setAll(false);
   const go = document.getElementById('impgo');
   if (go) go.onclick = () => applyPlan();
 }
@@ -949,6 +1039,7 @@ async function applyPlan(){
       say(`Adding stores…`);
       const rec = {...c.want};
       if (!rec.type_id && c.typeName) rec.type_id = findType(c.typeName);
+      rec.imported = {...c.snapshot, type_id: rec.type_id};
       const {data, error} = await db.from(TBL.shops).insert(rec).select().single();
       if (error){ problems.push(`${rec.name}: ${error.message}`); continue; }
       D.shops.push(data);
@@ -963,27 +1054,42 @@ async function applyPlan(){
     // Changes to stores we already had.
     for (const u of p.updates){
       say('Updating stores…');
-      const patch = {...u.changes};
-      if (patch.type_id === undefined && u.typeName && !u.changes.type_id){
+      const patch = {...u.safe};
+      u.conflicts.forEach(c => { if (c.take && c.k !== '__operator') patch[c.k] = c.theirs; });
+      if (patch.type_id === undefined && u.typeName && !u.safe.type_id){
         const t = findType(u.typeName); if (t) patch.type_id = t;
       }
+      // The baseline records what the spreadsheet said, whichever value we kept,
+      // so next time round we can still spot a genuine change in the sheet.
+      patch.imported = {...(u.snapshot || {}), type_id: u.snapshot.type_id || findType(u.typeName)};
       if (Object.keys(patch).length){
         const {data, error} = await db.from(TBL.shops).update(patch).eq('id', u.id).select().single();
         if (error){ problems.push(`${u.name}: ${error.message}`); continue; }
         Object.assign(D.shops.find(x => x.id === u.id), data);
       }
-      if (u.opChange){
-        for (const linkId of u.opChange.links){
+      const takenOp = u.conflicts.find(c => c.k === '__operator' && c.take);
+      const opMove = u.opChange || (takenOp ? takenOp.op : null);
+      if (opMove){
+        for (const linkId of opMove.links){
           const del = await db.from(TBL.shop_people).delete().eq('id', linkId);
           if (!del.error) D.shop_people = D.shop_people.filter(l => l.id !== linkId);
         }
-        const pid = findPerson(u.opChange.to);
+        const pid = findPerson(opMove.to);
         if (pid){
           const got = await db.from(TBL.shop_people)
             .insert({shop_id:u.id, person_id:pid, role:'Operator'}).select().single();
           if (!got.error) D.shop_people.push(got.data);
         }
       }
+    }
+    // Stores that already matched: record the sheet as the new baseline so a
+    // later edit here is recognised as ours.
+    for (const r of p.rebase){
+      const cur = D.shops.find(x => x.id === r.id);
+      if (cur && JSON.stringify(cur.imported || null) === JSON.stringify(r.snapshot)) continue;
+      const {data, error} = await db.from(TBL.shops)
+        .update({imported: r.snapshot}).eq('id', r.id).select().single();
+      if (!error && cur) Object.assign(cur, data);
     }
   } catch (e){
     problems.push(e.message);
@@ -1024,6 +1130,14 @@ function wireList(){
   if (y) y.onchange = () => { filters.year = y.value; render(); };
   const st = document.getElementById('status');
   if (st) st.onchange = () => { filters.status = st.value; drawList(); };
+  const so = document.getElementById('sort');
+  if (so) so.onchange = () => {
+    filters.sort = so.value;
+    if (document.getElementById('sortdef').checked) rememberSort(so.value);
+    render();
+  };
+  const sd = document.getElementById('sortdef');
+  if (sd) sd.onchange = () => rememberSort(sd.checked ? filters.sort : '');
   const tmf = document.getElementById('tm');
   if (tmf) tmf.onchange = () => { filters.tm = tmf.value; rememberTM(tmf.value); render(); };
   const nb = document.getElementById('new');
@@ -1049,6 +1163,7 @@ function drawList(){
       matches([s.name, s.operating_year, nameOf('cities', s.city_id), nameOf('locations', s.location_id),
                nameOf('store_types', s.type_id), s.store_status,
                peopleOn(s.id).map(p => p.name).join(' ')].join(' ')));
+    items = sortShops(items);
     html = items.map(shopRow).join('');
   } else {
     items = D[tab].filter(r => matches(Object.values(r).join(' ')));
@@ -1095,7 +1210,9 @@ function shopRow(s){
           whenLabel(s.build_date) ? ' · ' + esc(whenLabel(s.build_date)) : ''}</span>`
        : '<span>No build date</span>'}
        ${need ? `<span class="${builders.length >= need ? 'money' : ''}">${
-          builders.length} of ${need} builders</span>` : ''}`
+          builders.length} of ${need} builders</span>` : ''}
+       ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
+          s.commission_pct != null ? ` at ${s.commission_pct}%` : ''}</span>` : ''}`
     : `${days ? `<span>${days} days open</span>` : ''}
        ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
           d != null ? ` <span class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '−'}${money(Math.abs(d))}${
@@ -1670,6 +1787,7 @@ async function start(){
       return;
     }
     filters.year = currentYear();
+    filters.sort = recallSort() || 'build';
     const saved = recallTM();
     const me = D.people.find(p => isTM(p) && p.email &&
       p.email.toLowerCase() === session.user.email.toLowerCase());
