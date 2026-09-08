@@ -26,7 +26,7 @@
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{
-  background:var(--paper); color:var(--ink);
+  background:var(--paper); color:var(--ink); overflow-x:hidden;
   font-family:'Public Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   font-size:16px; line-height:1.45; -webkit-text-size-adjust:100%;
   font-variant-numeric:tabular-nums;
@@ -36,7 +36,8 @@ button,input,select,textarea{font:inherit; color:inherit}
 a{color:var(--accent)}
 
 /* ---------- shell ---------- */
-.wrap{max-width:940px; margin:0 auto; padding:0 16px 96px}
+.wrap{max-width:940px; margin:0 auto; padding:0 16px 96px; overflow-x:hidden}
+section.grp{overflow-x:auto}
 header.top{
   position:sticky; top:0; z-index:20; background:var(--paper);
   border-bottom:1px solid var(--line); padding-top:env(safe-area-inset-top);
@@ -161,9 +162,26 @@ table.money-t td:first-child{text-align:left; padding-left:0; font-size:13px;
 table.money-t td.pos{color:var(--live)} table.money-t td.neg{color:var(--accent)}
 table.money-t tr.sub td{font-size:15px; font-weight:600}
 table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
-@media (max-width:520px){
-  table.money-t td{font-size:16px; padding-left:8px}
-  table.money-t th{padding-left:8px}
+/* On a phone the four columns won't fit, so each line stacks into its own
+   block with the three figures side by side underneath the label. */
+@media (max-width:620px){
+  table.money-t, table.money-t tbody, table.money-t tr, table.money-t td{display:block}
+  table.money-t thead{display:none}
+  table.money-t tr{border-top:1px solid var(--line); padding:11px 0}
+  table.money-t tr:first-child{border-top:0}
+  table.money-t td{border:0; padding:0}
+  table.money-t td:first-child{
+    font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--muted); margin-bottom:7px;
+  }
+  table.money-t td:not(:first-child){
+    display:inline-block; width:33%; text-align:left; font-size:17px; vertical-align:top;
+  }
+  table.money-t td:not(:first-child)::before{
+    content:attr(data-h); display:block; font-size:10.5px; font-weight:700;
+    letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
+  }
+  table.money-t tr.sub td:not(:first-child){font-size:15px}
 }
 .fields{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px 22px}
 .f label{display:block; font-size:12px; color:var(--muted); margin-bottom:3px}
@@ -190,6 +208,15 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .rolechk{display:flex; align-items:center; gap:7px; padding:7px 12px; border:1px solid var(--line);
   border-radius:20px; background:var(--card); font-size:14px; cursor:pointer}
 .rolechk input{width:16px; height:16px; margin:0; accent-color:var(--accent)}
+.opcard{display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px;
+  background:var(--sink); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px}
+.opcard .nm{font-size:18px; font-weight:700; letter-spacing:-0.02em; cursor:pointer}
+.opcard .contact{display:flex; flex-wrap:wrap; gap:8px; margin-left:auto}
+.opcard a.call{display:inline-flex; align-items:center; gap:6px; padding:7px 14px;
+  border-radius:20px; background:var(--card); border:1px solid var(--line);
+  text-decoration:none; color:var(--ink); font-size:14px; font-weight:600}
+.opcard a.call:hover{border-color:var(--accent); color:var(--accent)}
+.opcard .none{color:var(--muted); font-size:14px}
 .copyrow{display:flex; gap:8px; flex-wrap:wrap}
 .copyrow select{flex:1 1 190px; min-width:0; padding:9px 11px; border:1px solid var(--line);
   border-radius:8px; background:var(--card)}
@@ -654,8 +681,11 @@ function drawSheet(){
       ${t === 'shops' && !openRec.id ? copyPicker() : ''}
       <form id="form" autocomplete="off">
         ${t === 'shops' && openRec.id ? headBlock(rec, phaseOf(rec)) : ''}
-        ${TABLES[t].fields.map(([grp, fs]) =>
-          sectionHtml(t, grp, fs, rec, t === 'shops' && openRec.id ? phaseOf(rec) : null)).join('')}
+        ${TABLES[t].fields.map(([grp, fs]) => {
+          const phase = t === 'shops' && openRec.id ? phaseOf(rec) : null;
+          const html = sectionHtml(t, grp, fs, rec, phase);
+          return t === 'shops' && grp === 'Store' ? html + operatorSection(rec) : html;
+        }).join('')}
         ${t === 'shops' && openRec.id ? peopleBlock(rec) : ''}
         ${t === 'people' && openRec.id ? storesBlock(rec) : ''}
       </form>
@@ -685,6 +715,11 @@ function drawSheet(){
   });
   const addBtn = el.querySelector('#addlink');
   if (addBtn) addBtn.onclick = () => link(rec.id);
+  const addOp = el.querySelector('#addop');
+  if (addOp) addOp.onclick = () => {
+    const pid = Number(el.querySelector('#opsel').value);
+    if (pid) link(rec.id, pid, 'Operator');
+  };
   const cp = el.querySelector('#copyfrom');
   if (cp) cp.onchange = () => applyCopy(Number(cp.value) || null);
   const cc = el.querySelector('#copycity');
@@ -885,13 +920,14 @@ function headBlock(s, phase){
 
 // Budget against actual, in columns.
 function moneyTable(s){
-  const cell = (v, dp2) => v == null ? '<td class="none">—</td>'
-    : `<td>${dp2 ? money2(v) : money(v)}</td>`;
+  const cell = (v, h, dp2) => v == null
+    ? `<td class="none" data-h="${h}">—</td>`
+    : `<td data-h="${h}">${dp2 ? money2(v) : money(v)}</td>`;
   const row = (label, b, a, opt = {}) => {
     const d = (b == null || a == null) ? null : a - b;
     return `<tr class="${opt.sub ? 'sub' : ''}"><td>${esc(label)}</td>
-      ${cell(b, opt.dp2)}${cell(a, opt.dp2)}
-      <td class="${d == null ? 'none' : d >= 0 ? 'pos' : 'neg'}">${
+      ${cell(b, 'Budget', opt.dp2)}${cell(a, 'Actual', opt.dp2)}
+      <td data-h="Difference" class="${d == null ? 'none' : d >= 0 ? 'pos' : 'neg'}">${
         d == null ? '—' : (d >= 0 ? '+' : '−') + (opt.dp2 ? money2(Math.abs(d)) : money(Math.abs(d)))
       }</td></tr>`;
   };
@@ -926,17 +962,62 @@ function sectionHtml(t, grp, fs, rec, phase){
   return `<section class="grp${now ? ' now' : ''}"><h3>${esc(grp)}</h3>${inner}</section>`;
 }
 
-function peopleBlock(s){
-  const list = peopleOn(s.id);
+// The operator gets a section of their own, with numbers you can tap.
+function operatorSection(rec){
   const mayEdit = canEdit('shops');
-  const roles = ['Operator','Builder','Store Staff','TM','Centre Management'];
-  return `<section class="grp"><h3>Who is on this store</h3>
+  const candidates = D.people
+    .filter(p => rolesOf(p).includes('Operator'))
+    .sort((a,b) => a.name.localeCompare(b.name));
+
+  // A store that hasn't been saved yet has nothing to link people to, so we
+  // hold the choice and attach it the moment it is saved.
+  if (!openRec.id){
+    return `<section class="grp"><h3>Operator</h3>
+      <div class="f wide"><label>Who is running it</label>
+        <select id="newop" ${mayEdit ? '' : 'disabled'}>
+          <option value="">Not decided yet</option>
+          ${candidates.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+        </select></div>
+      <p class="rmeta" style="margin:8px 0 0">Deliberately blank — last year's operator
+      is not carried over. If they're new, add them on the People tab first with
+      Operator ticked.</p></section>`;
+  }
+
+  const ops = peopleOn(rec.id).filter(p => p.role === 'Operator');
+  const cards = ops.map(l => {
+    const p = D.people.find(x => x.id === l.person_id) || {};
+    const bits = [];
+    if (p.phone1) bits.push(`<a class="call" href="tel:${esc(p.phone1)}">${esc(p.phone1)}</a>`);
+    if (p.phone2) bits.push(`<a class="call" href="tel:${esc(p.phone2)}">${esc(p.phone2)}</a>`);
+    if (p.email) bits.push(`<a class="call" href="mailto:${esc(p.email)}">Email</a>`);
+    return `<div class="opcard">
+      <span class="nm" data-goto="people:${p.id}">${esc(p.name || 'Unknown')}</span>
+      <div class="contact">${bits.length ? bits.join('') :
+        '<span class="none">No phone or email on file</span>'}</div>
+      ${mayEdit ? `<button type="button" class="x" data-unlink="${l.id}" title="Remove">×</button>` : ''}
+    </div>`;
+  }).join('');
+
+  return `<section class="grp"><h3>Operator</h3>
+    ${cards || '<div class="rmeta">No operator yet.</div>'}
+    ${!mayEdit ? '' : `<div class="addp">
+      <select id="opsel"><option value="">Choose an operator…</option>${
+        candidates.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      <button type="button" class="btn" id="addop">${ops.length ? 'Add another' : 'Set operator'}</button>
+    </div>`}</section>`;
+}
+
+function peopleBlock(s){
+  const list = peopleOn(s.id).filter(p => p.role !== 'Operator');
+  const mayEdit = canEdit('shops');
+  const roles = ['Builder','Store Staff','TM','Centre Management'];
+  return `<section class="grp"><h3>Builders and staff</h3>
     <div class="people-list">
       ${list.length ? list.map(p => `
         <div class="plink" data-goto="people:${p.person_id}">
           <span>${esc(p.name)}</span><span class="role">${esc(p.role)}</span>
           ${mayEdit ? `<button type="button" class="x" data-unlink="${p.id}" title="Remove">×</button>` : ''}
-        </div>`).join('') : '<div class="rmeta">Nobody attached yet.</div>'}
+        </div>`).join('') : '<div class="rmeta">No builders or staff attached yet.</div>'}
     </div>
     ${!mayEdit ? '' : `<div class="addp">
       <select id="np"><option value="">Choose a person…</option>${
@@ -1001,9 +1082,14 @@ async function save(t, rec){
       const {data, error} = await db.from(TBL[t]).insert(patch).select().single();
       if (error) throw error;
       D[t].push(data); openRec.id = data.id;
-      if (t === 'shops' && copyFrom){
-        const rows = (D.shop_people || []).filter(l => l.shop_id === copyFrom)
-          .map(l => ({shop_id:data.id, person_id:l.person_id, role:l.role}));
+      if (t === 'shops'){
+        const rows = copyFrom
+          ? (D.shop_people || []).filter(l => l.shop_id === copyFrom && l.role !== 'Operator')
+              .map(l => ({shop_id:data.id, person_id:l.person_id, role:l.role}))
+          : [];
+        const chosen = document.getElementById('newop');
+        const opId = chosen ? Number(chosen.value) : 0;
+        if (opId) rows.push({shop_id:data.id, person_id:opId, role:'Operator'});
         if (rows.length){
           const got = await db.from(TBL.shop_people).insert(rows).select();
           if (!got.error && got.data) D.shop_people.push(...got.data);
@@ -1028,9 +1114,9 @@ async function remove(t, rec){
   closeSheet(); render(); toast('Deleted');
 }
 
-async function link(shopId){
-  const pid = Number(document.getElementById('np').value);
-  const role = document.getElementById('nr').value;
+async function link(shopId, personId, roleName){
+  const pid = personId || Number(document.getElementById('np').value);
+  const role = roleName || document.getElementById('nr').value;
   if (!pid) return;
   const {data, error} = await db.from(TBL.shop_people)
     .insert({shop_id:shopId, person_id:pid, role}).select().single();
