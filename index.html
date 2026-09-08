@@ -363,6 +363,7 @@ function currentYear(){
 const SHOP_FIELDS = [
   ['Store', [
     ['city_id','City or town','ref:cities'], ['name','Store name','text'],
+    ['store_number','Store number','text'],
     ['operating_year','Operating year','text'], ['tm_id','Territory manager','tm'],
     ['location_id','Mall or arcade','ref:locations'],
     ['type_id','Store type','ref:store_types'],
@@ -371,6 +372,7 @@ const SHOP_FIELDS = [
     ['store_status','Store status','opt:Reserve|Pending|Active|Open and Trading'],
     ['operator_status','Operator status','opt:No Operator|Possible|Confirmed|Cancelled|Final Commissions Paid'],
     ['contract_signed','Contract','opt:Awaiting|Sent Form|Form Signed'],
+    ['lease_status','Lease status','text'],
     ['lock_in_year','Locked to this year','bool'],
   ]],
   ['Dates', [
@@ -397,7 +399,7 @@ const SHOP_FIELDS = [
 ];
 const PERSON_FIELDS = [['Person', [
   ['name','Name','text'], ['roles','Roles','roles'],
-  ['area','Area or territory','area'], ['email','Email','text'],
+  ['area','Area or territory','area'], ['tm_code','TM initials','text'], ['email','Email','text'],
   ['phone1','Phone','text'], ['phone2','Second phone','text'],
   ['address','Address','text'], ['city_id','City','ref:cities'], ['postcode','Postcode','text'],
   ['details','Details','textarea'],
@@ -467,17 +469,21 @@ function render(){
       <nav role="tablist">
         ${Object.entries(TABLES).filter(([,v]) => !v.adminOnly || myRole === 'admin').map(([k,v]) =>
           `<button role="tab" aria-selected="${k===tab}" data-tab="${k}">${v.label}</button>`).join('')}
+        ${canEdit('shops') ? `<button role="tab" aria-selected="${tab==='import'}"
+          data-tab="import">Import</button>` : ''}
         <button role="tab" aria-selected="${tab==='help'}" data-tab="help">Help</button>
       </nav>
     </header>
     <main class="wrap">${
-      tab === 'help' ? helpScreen() : tab === 'shops' ? shopsScreen() : listScreen(tab)}</main>`;
+      tab === 'help' ? helpScreen() :
+      tab === 'import' ? importScreen() :
+      tab === 'shops' ? shopsScreen() : listScreen(tab)}</main>`;
 
   document.getElementById('out').onclick = async () => { await db.auth.signOut(); location.reload(); };
   app.querySelectorAll('nav button').forEach(b => b.onclick = () => {
     tab = b.dataset.tab; filters = {q:'', year:filters.year, status:''}; render();
   });
-  wireList();
+  if (tab === 'import') wireImport(); else wireList();
   if (openRec) drawSheet();
 }
 
@@ -593,11 +599,413 @@ function helpScreen(){
       the address bar in Chrome or Edge.</p>
       <p>It then opens like any other app, with no address bar.</p>`)}
 
+    ${!can ? '' : q('Importing the Store Opening Report', `
+      <p>The <b>Import</b> tab reads the report spreadsheet as it comes from head
+      office. Choose the file, pick the sheet and the TM, and it shows exactly what it
+      would add and change before anything is written.</p>
+      <p>It matches on store number and season, so running the same file twice does
+      nothing the second time, and running next month's version only brings in what
+      has moved. Empty cells are left alone — an import never wipes something you have
+      filled in here.</p>
+      <p>Stores with no build or opening date are skipped, because there's no way to
+      tell which season they belong to. Store types and operators the report mentions
+      that aren't here yet are created for you.</p>`)}
+
     ${q('If something goes wrong', `
       <p>Signed in but seeing nothing? Your email hasn't been added to the access list
       yet — ask Barry.</p>
       <p>Page looks stale or odd? Sign out and back in, which reloads everything.</p>
       <p>Can't save a change? Your access is probably view only.</p>`)}`;
+}
+
+/* ------------------------------------------------------------------ importing
+   Reads the Store Opening Report spreadsheet, works out what has changed
+   against what's already here, shows it, and only then writes anything. */
+
+let impBook = null, impPlan = null, impBusy = false;
+
+const IMP = {                       // column headings we look for, in order
+  number:['Store Number'], name:['Store Name'], subtype:['Store Sub Type'],
+  status:['Store Status'], lease:['Pending Detail'], tm:['TM'],
+  build:['Build Date','Access Date'], openPlan:['Planned Opening'],
+  openActual:['Actual Opening'], lastPlan:['Planned Last Trade Date'],
+  lastActual:['Actual Last Trade Date'], budget:['Budget','Proj. Turnover'],
+  operator:['Store Operator'], fix:['Fix Arrival'],
+};
+const TYPE_ALIASES = {'SH LARGE':'SHOP LARGE','SH MEDIUM':'SHOP MEDIUM',
+  'SH SMALL':'SHOP SMALL','SH XSMALL':'SHOP XSMALL','SHOP TBC':'SH TBC'};
+
+function loadXLSX(){
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload = () => res(); sc.onerror = () => rej(new Error('Could not load the spreadsheet reader.'));
+    document.head.appendChild(sc);
+  });
+}
+
+const isDateish = v => !!v && typeof v === 'object' && typeof v.getFullYear === 'function';
+const impDate = v => {
+  if (!v) return null;
+  const d = isDateish(v) ? v : new Date(v);
+  if (isNaN(d)) return null;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+const impTime = v => {
+  if (!isDateish(v) || isNaN(v.getTime())) return null;
+  if (!v.getHours() && !v.getMinutes()) return null;   // midnight means "no time given"
+  return `${String(v.getHours()).padStart(2,'0')}:${String(v.getMinutes()).padStart(2,'0')}`;
+};
+const impNum = v => {
+  if (v == null || v === '') return null;
+  const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+  return isFinite(n) && n !== 0 ? n : null;
+};
+// A season runs autumn to winter, so anything from July on belongs to that year's.
+function seasonOf(ymd){
+  if (!ymd) return null;
+  const y = Number(ymd.slice(0,4)), m = Number(ymd.slice(5,7));
+  const start = m >= 7 ? y : y - 1;
+  return `${start}-${String((start+1)%100).padStart(2,'0')}`;
+}
+const norm = t => String(t == null ? '' : t).trim();
+const key = t => norm(t).toLowerCase();
+
+function cityFor(storeName){
+  const n = key(storeName);
+  let best = null;
+  D.cities.forEach(c => {
+    const cn = key(c.name);
+    if (n === cn || n.startsWith(cn + ' ')){
+      if (!best || cn.length > key(best.name).length) best = c;
+    }
+  });
+  return best;
+}
+
+function rowsOf(sheetName){
+  const grid = XLSX.utils.sheet_to_json(impBook.Sheets[sheetName],
+    {header:1, raw:true, cellDates:true, defval:null});
+  const h = grid.findIndex(r => (r || []).some(c => norm(c) === 'Store Number'));
+  if (h < 0) return null;
+  const head = grid[h].map(norm);
+  return grid.slice(h + 1)
+    .filter(r => r && norm(r[head.indexOf('Store Name')]))
+    .map(r => { const o = {}; head.forEach((k, i) => { if (k) o[k] = r[i]; }); return o; });
+}
+const pick = (row, names) => {
+  for (const n of names) if (row[n] != null && norm(row[n]) !== '') return row[n];
+  return null;
+};
+
+function buildPlan(sheetName, tmCode){
+  const rows = rowsOf(sheetName);
+  if (!rows) throw new Error('That sheet has no "Store Number" heading, so it isn\'t a store list.');
+
+  const plan = {creates:[], updates:[], same:0, newTypes:new Set(), newPeople:new Set(),
+                noYear:[], sheet:sheetName};
+
+  rows.forEach(row => {
+    const tm = norm(pick(row, IMP.tm));
+    if (tmCode && tm !== tmCode) return;
+
+    const name = norm(pick(row, IMP.name));
+    const number = norm(pick(row, IMP.number)) || null;
+    const build = impDate(pick(row, IMP.build));
+    const open = impDate(pick(row, IMP.openActual)) || impDate(pick(row, IMP.openPlan));
+    const close = impDate(pick(row, IMP.lastActual)) || impDate(pick(row, IMP.lastPlan));
+    const year = seasonOf(open || build);
+    if (!year){ plan.noYear.push(name); return; }
+
+    const subtype = norm(pick(row, IMP.subtype));
+    const wanted = TYPE_ALIASES[subtype.toUpperCase()] || subtype;
+    let type = D.store_types.find(t => key(t.name) === key(wanted));
+    if (!type && subtype) plan.newTypes.add(wanted);
+
+    const opName = norm(pick(row, IMP.operator));
+    let person = opName ? D.people.find(p => key(p.name) === key(opName)) : null;
+    if (opName && !person) plan.newPeople.add(opName);
+
+    const tmPerson = tm ? D.people.find(p => key(p.tm_code) === key(tm)) : null;
+    const city = cityFor(name);
+
+    const want = {
+      store_number: number,
+      name, operating_year: year,
+      city_id: city ? city.id : null,
+      type_id: type ? type.id : null,
+      tm_id: tmPerson ? tmPerson.id : null,
+      store_status: norm(pick(row, IMP.status)) || null,
+      lease_status: norm(pick(row, IMP.lease)) || null,
+      build_date: build, opening_date: open, closedown_date: close,
+      build_start_time: impTime(pick(row, IMP.fix)),
+      budget: impNum(pick(row, IMP.budget)),
+    };
+
+    const existing = D.shops.find(sh =>
+      (number && sh.store_number === number && sh.operating_year === year) ||
+      (key(sh.name) === key(name) && sh.operating_year === year));
+
+    if (!existing){
+      plan.creates.push({want, typeName: type ? null : wanted, opName, row});
+      return;
+    }
+
+    // Only fields the sheet actually has a value for, and only where different.
+    const changes = {};
+    Object.entries(want).forEach(([k, v]) => {
+      if (v == null || v === '') return;
+      const now = existing[k];
+      if (k.endsWith('_id') || k === 'budget'){ if (Number(now) !== Number(v)) changes[k] = v; }
+      else if (norm(now) !== norm(v)) changes[k] = v;
+    });
+
+    const currentOps = peopleOn(existing.id).filter(l => l.role === 'Operator');
+    const opChange = opName && !currentOps.some(l => key(l.name) === key(opName))
+      ? {from: currentOps.map(l => l.name).join(' & ') || 'nobody', to: opName,
+         links: currentOps.map(l => l.id)}
+      : null;
+
+    if (Object.keys(changes).length || opChange){
+      plan.updates.push({id: existing.id, name: existing.name, changes, opChange,
+                         typeName: type ? null : wanted, opName});
+    } else {
+      plan.same++;
+    }
+  });
+  return plan;
+}
+
+const FIELD_LABEL = {store_number:'Store number', name:'Store name', operating_year:'Season',
+  city_id:'City', type_id:'Store type', tm_id:'TM', store_status:'Status',
+  lease_status:'Lease status', build_date:'Build date', opening_date:'Opening date',
+  closedown_date:'Closedown date', build_start_time:'Build starts', budget:'Budget'};
+
+function showValue(k, v){
+  if (k === 'city_id') return nameOf('cities', v);
+  if (k === 'type_id') return nameOf('store_types', v);
+  if (k === 'tm_id') return nameOf('people', v);
+  if (k === 'budget') return money(v);
+  if (k.endsWith('_date')) return ukDate(v);
+  return String(v);
+}
+
+function importScreen(){
+  const tms = D.people.filter(isTM).sort((a,b) => a.name.localeCompare(b.name));
+  return `
+    <h2 class="detail" style="margin-top:22px">Import from the Store Opening Report</h2>
+    <div class="sub">Adds stores that aren't here yet and updates the ones that are.
+      Nothing is written until you've seen what it intends to do.</div>
+
+    <section class="grp"><h3>1. Choose the file</h3>
+      <input type="file" id="impfile" accept=".xlsx,.xlsm,.xls"
+        style="width:100%; padding:11px; border:1px solid var(--line);
+               border-radius:8px; background:var(--card)">
+      <p class="rmeta" style="margin:10px 0 0">The report as it comes, no tidying needed.
+      It's read on your device — the file itself is never uploaded anywhere.</p>
+    </section>
+
+    <div id="impopts"></div>
+    <div id="impplan"></div>`;
+}
+
+function wireImport(){
+  const f = document.getElementById('impfile');
+  if (f) f.onchange = () => readFile(f.files[0]);
+}
+
+async function readFile(file){
+  const opts = document.getElementById('impopts');
+  const plan = document.getElementById('impplan');
+  plan.innerHTML = '';
+  if (!file) return;
+  opts.innerHTML = '<section class="grp"><h3>Reading</h3><p>Opening the file…</p></section>';
+  try {
+    await loadXLSX();
+    impBook = XLSX.read(await file.arrayBuffer(), {cellDates:true});
+  } catch (e){
+    opts.innerHTML = `<section class="grp"><h3>Could not read it</h3>
+      <p>${esc(e.message)}</p></section>`;
+    return;
+  }
+
+  const sheets = impBook.SheetNames.filter(n => rowsOf(n));
+  if (!sheets.length){
+    opts.innerHTML = `<section class="grp"><h3>Nothing to import</h3>
+      <p>No sheet in that file has a "Store Number" column, so it doesn't look like a
+      Store Opening Report.</p></section>`;
+    return;
+  }
+
+  const me = D.people.find(p => p.email && p.email.toLowerCase() === session.user.email.toLowerCase());
+  const myCode = me && me.tm_code ? me.tm_code : '';
+  const preferred = sheets.find(n => n === myCode) || sheets[0];
+  const codes = [...new Set(D.people.filter(p => p.tm_code).map(p => p.tm_code))].sort();
+
+  opts.innerHTML = `<section class="grp"><h3>2. What to bring in</h3>
+    <div class="fields">
+      <div class="f"><label>Sheet</label>
+        <select id="impsheet">${sheets.map(n =>
+          `<option ${n === preferred ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
+      <div class="f"><label>Only this TM</label>
+        <select id="imptm"><option value="">Everyone on the sheet</option>
+          ${codes.map(c => `<option ${c === myCode ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select></div>
+    </div>
+    <button class="btn primary" id="impcheck" style="margin-top:14px">See what would change</button>
+  </section>`;
+
+  document.getElementById('impcheck').onclick = () => {
+    try {
+      impPlan = buildPlan(document.getElementById('impsheet').value,
+                          document.getElementById('imptm').value);
+      drawPlan();
+    } catch (e){
+      document.getElementById('impplan').innerHTML =
+        `<section class="grp"><h3>Could not read that sheet</h3><p>${esc(e.message)}</p></section>`;
+    }
+  };
+}
+
+function drawPlan(){
+  const p = impPlan;
+  const box = document.getElementById('impplan');
+  const nothing = !p.creates.length && !p.updates.length;
+
+  box.innerHTML = `
+    <section class="grp ${nothing ? '' : 'now'}"><h3>3. What would happen</h3>
+      <div class="head"><div class="big">
+        <div><label>New stores</label><b>${p.creates.length}</b></div>
+        <div><label>Updated</label><b>${p.updates.length}</b></div>
+        <div><label>Already correct</label><b>${p.same}</b></div>
+      </div>
+      ${p.newTypes.size || p.newPeople.size || p.noYear.length ? `<div class="ticks">
+        ${p.newTypes.size ? `<span class="tick">${p.newTypes.size} new store type${
+          p.newTypes.size === 1 ? '' : 's'}: ${esc([...p.newTypes].join(', '))}</span>` : ''}
+        ${p.newPeople.size ? `<span class="tick">${p.newPeople.size} new operator${
+          p.newPeople.size === 1 ? '' : 's'} to add</span>` : ''}
+        ${p.noYear.length ? `<span class="tick no">${p.noYear.length} skipped, no dates</span>` : ''}
+      </div>` : ''}</div>
+
+      ${nothing ? '<p style="margin-top:14px">Everything on that sheet already matches. Nothing to do.</p>' : `
+      <button class="btn primary" id="impgo" style="margin-top:14px">Apply these changes</button>
+      <p class="rmeta" style="margin:10px 0 0">Empty cells in the spreadsheet are left alone —
+      an import never wipes something you've filled in here.</p>`}
+    </section>
+
+    ${!p.creates.length ? '' : `<section class="grp"><h3>New stores (${p.creates.length})</h3>
+      <div class="people-list">${p.creates.map(c => `<div class="plink">
+        <span>${esc(c.want.name)}</span>
+        <span class="role">${esc([c.want.operating_year, ukDate(c.want.build_date),
+          c.opName || 'no operator'].filter(Boolean).join(' · '))}</span></div>`).join('')}</div>
+    </section>`}
+
+    ${!p.updates.length ? '' : `<section class="grp"><h3>Changes to existing stores (${p.updates.length})</h3>
+      <div class="people-list">${p.updates.map(u => `<div class="plink" style="display:block">
+        <div style="font-weight:600">${esc(u.name)}</div>
+        <div class="rmeta">${[
+          ...Object.entries(u.changes).map(([k, v]) =>
+            `${esc(FIELD_LABEL[k] || k)} → ${esc(showValue(k, v))}`),
+          u.opChange ? `Operator ${esc(u.opChange.from)} → ${esc(u.opChange.to)}` : '',
+        ].filter(Boolean).join(' · ')}</div></div>`).join('')}</div>
+    </section>`}
+
+    ${!p.noYear.length ? '' : `<section class="grp"><h3>Skipped (${p.noYear.length})</h3>
+      <p class="rmeta">No build or opening date, so there's no way to tell which season
+      they belong to: ${esc(p.noYear.slice(0,12).join(', '))}${
+        p.noYear.length > 12 ? ' and others' : ''}.</p></section>`}`;
+
+  const go = document.getElementById('impgo');
+  if (go) go.onclick = () => applyPlan();
+}
+
+async function applyPlan(){
+  if (impBusy) return;
+  impBusy = true;
+  const btn = document.getElementById('impgo');
+  const say = t => { if (btn) btn.textContent = t; };
+  btn.disabled = true; say('Working…');
+  const p = impPlan, problems = [];
+
+  try {
+    // Store types the report uses that we don't have yet.
+    for (const nm of p.newTypes){
+      const {data, error} = await db.from(TBL.store_types).insert({name: nm}).select().single();
+      if (error) problems.push(`store type ${nm}: ${error.message}`); else D.store_types.push(data);
+    }
+    // Operators we've not met before.
+    for (const nm of p.newPeople){
+      const {data, error} = await db.from(TBL.people)
+        .insert({name: nm, roles: ['Operator']}).select().single();
+      if (error) problems.push(`person ${nm}: ${error.message}`); else D.people.push(data);
+    }
+
+    const findType = nm => (D.store_types.find(t => key(t.name) === key(nm)) || {}).id || null;
+    const findPerson = nm => (D.people.find(x => key(x.name) === key(nm)) || {}).id || null;
+
+    // New stores, and their operator.
+    for (const c of p.creates){
+      say(`Adding stores…`);
+      const rec = {...c.want};
+      if (!rec.type_id && c.typeName) rec.type_id = findType(c.typeName);
+      const {data, error} = await db.from(TBL.shops).insert(rec).select().single();
+      if (error){ problems.push(`${rec.name}: ${error.message}`); continue; }
+      D.shops.push(data);
+      const pid = c.opName ? findPerson(c.opName) : null;
+      if (pid){
+        const got = await db.from(TBL.shop_people)
+          .insert({shop_id:data.id, person_id:pid, role:'Operator'}).select().single();
+        if (!got.error) D.shop_people.push(got.data);
+      }
+    }
+
+    // Changes to stores we already had.
+    for (const u of p.updates){
+      say('Updating stores…');
+      const patch = {...u.changes};
+      if (patch.type_id === undefined && u.typeName && !u.changes.type_id){
+        const t = findType(u.typeName); if (t) patch.type_id = t;
+      }
+      if (Object.keys(patch).length){
+        const {data, error} = await db.from(TBL.shops).update(patch).eq('id', u.id).select().single();
+        if (error){ problems.push(`${u.name}: ${error.message}`); continue; }
+        Object.assign(D.shops.find(x => x.id === u.id), data);
+      }
+      if (u.opChange){
+        for (const linkId of u.opChange.links){
+          const del = await db.from(TBL.shop_people).delete().eq('id', linkId);
+          if (!del.error) D.shop_people = D.shop_people.filter(l => l.id !== linkId);
+        }
+        const pid = findPerson(u.opChange.to);
+        if (pid){
+          const got = await db.from(TBL.shop_people)
+            .insert({shop_id:u.id, person_id:pid, role:'Operator'}).select().single();
+          if (!got.error) D.shop_people.push(got.data);
+        }
+      }
+    }
+  } catch (e){
+    problems.push(e.message);
+  }
+
+  D.shops.sort((a,b) => (b.operating_year || '').localeCompare(a.operating_year || '')
+    || (a.name || '').localeCompare(b.name || ''));
+  impBusy = false;
+
+  document.getElementById('impplan').innerHTML = `
+    <section class="grp now"><h3>Done</h3>
+      <div class="head"><div class="big">
+        <div><label>Stores added</label><b>${p.creates.length - problems.length}</b></div>
+        <div><label>Stores updated</label><b>${p.updates.length}</b></div>
+      </div></div>
+      ${problems.length ? `<p style="margin-top:14px;color:var(--accent)">
+        ${problems.length} problem${problems.length === 1 ? '' : 's'}:</p>
+        <p class="rmeta">${esc(problems.slice(0,8).join(' · '))}</p>` : ''}
+      <button class="btn primary" id="impdone" style="margin-top:14px">Back to the stores</button>
+    </section>`;
+  document.getElementById('impdone').onclick = () => { tab = 'shops'; render(); };
+  toast('Import finished');
 }
 
 function listScreen(t){
