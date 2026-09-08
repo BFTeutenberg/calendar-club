@@ -165,23 +165,24 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 /* On a phone the four columns won't fit, so each line stacks into its own
    block with the three figures side by side underneath the label. */
 @media (max-width:620px){
-  table.money-t, table.money-t tbody, table.money-t tr, table.money-t td{display:block}
+  table.money-t, table.money-t tbody{display:block}
   table.money-t thead{display:none}
-  table.money-t tr{border-top:1px solid var(--line); padding:11px 0}
+  table.money-t tr{
+    display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:3px 10px;
+    border-top:1px solid var(--line); padding:11px 0;
+  }
   table.money-t tr:first-child{border-top:0}
-  table.money-t td{border:0; padding:0}
+  table.money-t td{border:0; padding:0; text-align:left; min-width:0}
   table.money-t td:first-child{
-    font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
-    color:var(--muted); margin-bottom:7px;
+    grid-column:1 / -1; font-size:12px; font-weight:700; letter-spacing:.05em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:2px;
   }
-  table.money-t td:not(:first-child){
-    display:inline-block; width:33%; text-align:left; font-size:17px; vertical-align:top;
-  }
+  table.money-t td:not(:first-child){font-size:16px; letter-spacing:-0.03em}
   table.money-t td:not(:first-child)::before{
-    content:attr(data-h); display:block; font-size:10.5px; font-weight:700;
-    letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
+    content:attr(data-h); display:block; font-size:10px; font-weight:700;
+    letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin-bottom:1px;
   }
-  table.money-t tr.sub td:not(:first-child){font-size:15px}
+  table.money-t tr.sub td:not(:first-child){font-size:15px; font-weight:600}
 }
 .fields{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px 22px}
 .f label{display:block; font-size:12px; color:var(--muted); margin-bottom:3px}
@@ -288,6 +289,9 @@ const money = v => v == null || v === '' ? '' :
 const money2 = v => v == null || v === '' ? '' :
   '£' + Number(v).toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2});
 const signed = v => v == null ? '' : (v >= 0 ? '+' : '−') + money(Math.abs(v));
+const narrow = () => typeof window.matchMedia === 'function'
+  ? window.matchMedia('(max-width:620px)').matches
+  : window.innerWidth > 0 && window.innerWidth <= 620;
 const ukDate = d => !d ? '' :
   new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'});
 
@@ -463,9 +467,11 @@ function render(){
       <nav role="tablist">
         ${Object.entries(TABLES).filter(([,v]) => !v.adminOnly || myRole === 'admin').map(([k,v]) =>
           `<button role="tab" aria-selected="${k===tab}" data-tab="${k}">${v.label}</button>`).join('')}
+        <button role="tab" aria-selected="${tab==='help'}" data-tab="help">Help</button>
       </nav>
     </header>
-    <main class="wrap">${tab === 'shops' ? shopsScreen() : listScreen(tab)}</main>`;
+    <main class="wrap">${
+      tab === 'help' ? helpScreen() : tab === 'shops' ? shopsScreen() : listScreen(tab)}</main>`;
 
   document.getElementById('out').onclick = async () => { await db.auth.signOut(); location.reload(); };
   app.querySelectorAll('nav button').forEach(b => b.onclick = () => {
@@ -512,6 +518,86 @@ function shopsScreen(){
       ${canEdit('shops') ? '<button class="btn primary" id="new">Add store</button>' : ''}
     </div>
     <div id="list"></div>`;
+}
+
+function helpScreen(){
+  const can = canEdit('shops');
+  const q = (h, body) => `<section class="grp"><h3>${h}</h3>${body}</section>`;
+  return `
+    <h2 class="detail" style="margin-top:22px">How this works</h2>
+    <div class="sub">You're signed in as ${esc(session.user.email)}${
+      myRole ? ' · ' + esc(myRole) : ''}.</div>
+
+    ${q('Finding a store', `
+      <p>The <b>Stores</b> tab opens on the current season. The three dropdowns narrow
+      the list by year, status and area, and they work together.</p>
+      <p>The search box matches store names, cities, malls, store types and the people
+      attached — so typing a builder's name finds every store they worked on. Several
+      words all have to match, so <i>helen derby</i> finds Derby stores Helen was on.</p>
+      <p>The <b>area</b> dropdown sticks. Pick your own patch once and it's still there
+      next time you sign in on that device.</p>`)}
+
+    ${q('Reading a store', `
+      <p>The block at the top changes with the season. Before opening it shows the
+      build date and countdown, start and pallet times, store type with how many
+      builders it needs, the operator, who's booked, and the opening date. Once the
+      store opens it switches to the operator, the dates and budget against actual.</p>
+      <p>The coloured pills are the readiness checks — delivery, RAMS &amp; SIPS and
+      head office sign-off. Green is done, red is not.</p>
+      <p>The thin bar underneath is the trading window drawn across September to
+      January, with an amber tick for the build date.</p>
+      <p>The section with the red edge is the one that matters at this point in the
+      season. Everything else is still there, just quieter.</p>`)}
+
+    ${q('The operator', `
+      <p>Phone numbers and email sit on the operator card near the top of every store.
+      Tap a number to ring it, tap Email to write to them. Tap their name to see every
+      store they've run.</p>
+      <p>Those details live on the person, not the store, so correcting a number once
+      fixes it everywhere.</p>`)}
+
+    ${q('The money', `
+      <p>Budget, actual and the difference, for sales, dated, gift and commission.
+      Green means above budget, red means below.</p>
+      <p>The difference, the percentage variation, the commission amounts and the days
+      open are all worked out from the figures you enter, so they can't fall out of
+      step. Only the budget, actual and commission percentage are typed in.</p>`)}
+
+    ${!can ? q('What you can change', `
+      <p>Your access is view only. You can see and search everything, but not change
+      it. If you need to correct something, ask Barry.</p>`) : q('Adding a store', `
+      <p><b>Add store</b> at the top of the Stores tab. Choose the city first, then the
+      store from the list of previous ones — that fills in the name, mall, store type
+      and TM, and brings across the builders and staff who were on it.</p>
+      <p>The operator is deliberately left blank each season. Set it from the Operator
+      dropdown before saving. If they're new, add them on the <b>People</b> tab first
+      with Operator ticked, or they won't appear.</p>
+      <p>Dates and figures always start empty.</p>`)}
+
+    ${!can ? '' : q('People, malls and types', `
+      <p><b>People</b> holds everyone, each with any combination of Operator, Builder,
+      Store Staff, TM, Management and Centre Management ticked. Somebody can be a TM
+      and still build. Only people with TM ticked appear in the TM dropdown and the
+      area filter.</p>
+      <p><b>Malls</b> holds the centres, with parking notes, charges and what3words.
+      Where coordinates are stored you get an "Open in maps" link.</p>
+      <p><b>Types</b> feeds the store type dropdown. Types are never deleted — set
+      <b>Still in use</b> to No and it drops out of the dropdown while staying on the
+      stores that already have it. The <b>Builders required</b> number is what drives
+      the "2 of 3 builders" warning on the store list.</p>`)}
+
+    ${q('Getting it on your phone', `
+      <p>On an iPhone, open the address in Safari, tap the share button, then <b>Add to
+      Home Screen</b>. On Android, open it in Chrome and use <b>Install app</b> from the
+      three-dot menu. On a laptop, look for the install icon at the right-hand end of
+      the address bar in Chrome or Edge.</p>
+      <p>It then opens like any other app, with no address bar.</p>`)}
+
+    ${q('If something goes wrong', `
+      <p>Signed in but seeing nothing? Your email hasn't been added to the access list
+      yet — ask Barry.</p>
+      <p>Page looks stale or odd? Sign out and back in, which reloads everything.</p>
+      <p>Can't save a change? Your access is probably view only.</p>`)}`;
 }
 
 function listScreen(t){
@@ -939,7 +1025,7 @@ function moneyTable(s){
         ${row('Dated', s.dated_budget, s.dated_actual, {sub:true})}
         ${row('Gift', s.gift_budget, s.gift_actual, {sub:true})}
         ${row('Commission' + (s.commission_pct != null ? ' at ' + s.commission_pct + '%' : ''),
-              budgetAmt(s), actualAmt(s), {dp2:true})}
+              budgetAmt(s), actualAmt(s), {dp2: !narrow()})}
       </tbody>
     </table>
     <div class="fields" style="margin-top:14px">
