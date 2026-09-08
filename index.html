@@ -186,6 +186,13 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .plink .x{margin-left:8px; color:var(--accent); background:none; border:0; cursor:pointer; font-size:16px}
 .addp{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
 .addp select{flex:1 1 150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card)}
+.rolebox{display:flex; flex-wrap:wrap; gap:8px}
+.rolechk{display:flex; align-items:center; gap:7px; padding:7px 12px; border:1px solid var(--line);
+  border-radius:20px; background:var(--card); font-size:14px; cursor:pointer}
+.rolechk input{width:16px; height:16px; margin:0; accent-color:var(--accent)}
+.copyrow{display:flex; gap:8px; flex-wrap:wrap}
+.copyrow select{flex:1 1 190px; min-width:0; padding:9px 11px; border:1px solid var(--line);
+  border-radius:8px; background:var(--card)}
 
 /* ---------- login ---------- */
 .login{max-width:340px; margin:14vh auto; padding:0 20px; text-align:left}
@@ -231,7 +238,14 @@ const TBL = {                  // short name in the app -> table in Supabase
 let D = {};                    // every table, held in memory
 let myRole = null;             // admin, editor or viewer
 let tab = 'shops';
-let filters = { q:'', year:'', status:'' };
+let filters = { q:'', year:'', status:'', tm:'' };
+
+function rememberTM(v){
+  try { localStorage.setItem('cc_tm_filter', v || ''); } catch (e) {}
+}
+function recallTM(){
+  try { return localStorage.getItem('cc_tm_filter') || ''; } catch (e) { return ''; }
+}
 let openRec = null;            // {table, id} currently on screen
 let editing = false;
 
@@ -270,6 +284,10 @@ const canEdit = t => myRole === 'admin' || (myRole === 'editor' && t !== 'member
 const titleOf = (t, r) => t === 'members' ? (r.email || '') : (r.name || '');
 
 const nameOf = (table, id) => { const r = (D[table] || []).find(x => x.id === id); return r ? r.name : ''; };
+const ALL_ROLES = ['Operator','Builder','Store Staff','TM','Management','Centre Management'];
+const rolesOf = p => Array.isArray(p && p.roles) ? p.roles : [];
+const isTM = p => rolesOf(p).includes('TM');
+const personLabel = p => p.name + (p.area ? ' — ' + p.area : '');
 const ROLE_ORDER = ['Operator','Builder','Store Staff','TM','Centre Management'];
 const roleRank = r => { const i = ROLE_ORDER.indexOf(r); return i < 0 ? 99 : i; };
 const peopleOn = shopId => (D.shop_people || []).filter(l => l.shop_id === shopId)
@@ -312,9 +330,10 @@ function currentYear(){
 
 /* ---------------------------------------------- what each field looks like */
 const SHOP_FIELDS = [
-  ['Where', [
-    ['name','Store name','text'], ['operating_year','Operating year','text'],
-    ['city_id','City','ref:cities'], ['location_id','Mall or arcade','ref:locations'],
+  ['Store', [
+    ['city_id','City or town','ref:cities'], ['name','Store name','text'],
+    ['operating_year','Operating year','text'], ['tm_id','Territory manager','tm'],
+    ['location_id','Mall or arcade','ref:locations'],
     ['type_id','Store type','ref:store_types'],
   ]],
   ['Status', [
@@ -346,8 +365,8 @@ const SHOP_FIELDS = [
   ]],
 ];
 const PERSON_FIELDS = [['Person', [
-  ['name','Name','text'], ['role','Main role','opt:Operator|Builder|Store Staff|TM|Management|Centre Management'],
-  ['other_roles','Other roles','text'], ['email','Email','text'],
+  ['name','Name','text'], ['roles','Roles','roles'],
+  ['area','Area or territory','area'], ['email','Email','text'],
   ['phone1','Phone','text'], ['phone2','Second phone','text'],
   ['address','Address','text'], ['city_id','City','ref:cities'], ['postcode','Postcode','text'],
   ['details','Details','textarea'],
@@ -431,7 +450,10 @@ function render(){
 
 function shopsScreen(){
   const years = [...new Set(D.shops.map(s => s.operating_year))].sort().reverse();
-  const inYear = D.shops.filter(s => !filters.year || s.operating_year === filters.year);
+  const tms = D.people.filter(isTM).sort((a,b) => a.name.localeCompare(b.name));
+  const inYear = D.shops.filter(s =>
+    (!filters.year || s.operating_year === filters.year) &&
+    (!filters.tm || s.tm_id === Number(filters.tm)));
   const bud = inYear.reduce((t,s) => t + (s.budget || 0), 0);
   const act = inYear.reduce((t,s) => t + (s.actual || 0), 0);
   const diff = act - bud;
@@ -455,6 +477,11 @@ function shopsScreen(){
         ${['Reserve','Pending','Active','Open and Trading']
           .map(s => `<option ${s===filters.status?'selected':''}>${s}</option>`).join('')}
       </select>
+      ${tms.length ? `<select class="filter" id="tm">
+        <option value="">All areas</option>
+        ${tms.map(p => `<option value="${p.id}" ${String(p.id)===String(filters.tm)?'selected':''}>${
+          esc(personLabel(p))}</option>`).join('')}
+      </select>` : ''}
       ${canEdit('shops') ? '<button class="btn primary" id="new">Add store</button>' : ''}
     </div>
     <div id="list"></div>`;
@@ -476,6 +503,8 @@ function wireList(){
   if (y) y.onchange = () => { filters.year = y.value; render(); };
   const st = document.getElementById('status');
   if (st) st.onchange = () => { filters.status = st.value; drawList(); };
+  const tmf = document.getElementById('tm');
+  if (tmf) tmf.onchange = () => { filters.tm = tmf.value; rememberTM(tmf.value); render(); };
   const nb = document.getElementById('new');
   if (nb) nb.onclick = () => { copyFrom = null; openRec = {table:tab, id:null}; editing = true; drawSheet(); };
   drawList();
@@ -494,6 +523,7 @@ function drawList(){
   if (tab === 'shops'){
     items = D.shops.filter(s =>
       (!filters.year || s.operating_year === filters.year) &&
+      (!filters.tm || s.tm_id === Number(filters.tm)) &&
       (!filters.status || s.store_status === filters.status) &&
       matches([s.name, s.operating_year, nameOf('cities', s.city_id), nameOf('locations', s.location_id),
                nameOf('store_types', s.type_id), s.store_status,
@@ -567,8 +597,8 @@ function plainRow(t, r){
   let meta = '';
   if (t === 'people'){
     const jobs = (D.shop_people || []).filter(l => l.person_id === r.id).length;
-    meta = [r.role, r.phone1, r.email, jobs ? `${jobs} store${jobs === 1 ? '' : 's'}` : '']
-      .filter(Boolean).join(' · ');
+    meta = [rolesOf(r).join(', '), r.area, r.phone1,
+            jobs ? `${jobs} store${jobs === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
   } else if (t === 'locations'){
     meta = [nameOf('cities', r.city_id), r.postcode].filter(Boolean).join(' · ');
   } else if (t === 'store_types'){
@@ -657,26 +687,47 @@ function drawSheet(){
   if (addBtn) addBtn.onclick = () => link(rec.id);
   const cp = el.querySelector('#copyfrom');
   if (cp) cp.onchange = () => applyCopy(Number(cp.value) || null);
+  const cc = el.querySelector('#copycity');
+  if (cc) cc.onchange = () => {
+    cp.innerHTML = storeOptions(cc.value);
+    applyCopy(null);
+    const form = document.getElementById('form');
+    if (form && form.elements['city_id']) form.elements['city_id'].value = cc.value || '';
+  };
 }
 
 let copyFrom = null;   // the store a new one is being based on
 
-function copyPicker(){
+// The most recent run of each store, which is what a new season is copied from.
+function previousStores(){
   const latest = new Map();
   [...D.shops].sort((a,b) => (a.operating_year || '').localeCompare(b.operating_year || ''))
     .forEach(s => latest.set(s.name, s));
-  const list = [...latest.values()].sort((a,b) => a.name.localeCompare(b.name));
+  return [...latest.values()].sort((a,b) => a.name.localeCompare(b.name));
+}
+
+function storeOptions(cityId){
+  const list = previousStores().filter(s => !cityId || s.city_id === Number(cityId));
+  return `<option value="">Choose a store…</option>` + list.map(s =>
+    `<option value="${s.id}">${esc(s.name)} — last run ${esc(s.operating_year)}</option>`).join('');
+}
+
+function copyPicker(){
+  const withStores = new Set(previousStores().map(s => s.city_id).filter(Boolean));
+  const cities = D.cities.filter(c => withStores.has(c.id)).sort((a,b) => a.name.localeCompare(b.name));
   return `<div class="head" style="margin-bottom:18px">
     <label style="display:block; font-size:11px; font-weight:600; letter-spacing:.05em;
-      text-transform:uppercase; color:var(--muted); margin-bottom:6px">Start from a previous store</label>
-    <select id="copyfrom" style="width:100%; max-width:420px; padding:9px 11px;
-      border:1px solid var(--line); border-radius:8px; background:var(--card)">
-      <option value="">Type it in from scratch…</option>
-      ${list.map(s => `<option value="${s.id}">${esc(s.name)} — last run ${esc(s.operating_year)}</option>`).join('')}
-    </select>
-    <p class="rmeta" style="margin:8px 0 0">Copies the name, city, mall, store type, TM
-    and the people who were on it. Dates and figures stay blank. Change what's
-    different, then save.</p>
+      text-transform:uppercase; color:var(--muted); margin-bottom:8px">Start from a previous store</label>
+    <div class="copyrow">
+      <select id="copycity">
+        <option value="">All cities…</option>
+        ${cities.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+      </select>
+      <select id="copyfrom">${storeOptions('')}</select>
+    </div>
+    <p class="rmeta" style="margin:8px 0 0">Pick the city first to narrow the list.
+    Copies the name, city, mall, store type, TM and the people who were on it.
+    Dates and figures stay blank. Or ignore this and type it in below.</p>
   </div>`;
 }
 
@@ -706,7 +757,12 @@ function fieldHtml([k, label, type], rec){
 
   if (!editing){
     let shown = '';
-    if (type.startsWith('ref:')) shown = nameOf(type.slice(4), v);
+    if (type === 'roles') shown = rolesOf(rec).join(', ');
+    else if (type === 'tm'){
+      const p = D.people.find(x => x.id === v);
+      shown = p ? personLabel(p) : '';
+    }
+    else if (type.startsWith('ref:')) shown = nameOf(type.slice(4), v);
     else if (type === 'bool') shown = v == null ? '' : (v ? 'Yes' : 'No');
     else if (type === 'money') shown = money2(v);
     else if (type === 'date') shown = ukDate(v);
@@ -723,6 +779,27 @@ function fieldHtml([k, label, type], rec){
   }
 
   const val = v == null ? '' : v;
+  if (type === 'roles'){
+    const have = rolesOf(rec);
+    body = `<div class="rolebox">${ALL_ROLES.map(r =>
+      `<label class="rolechk"><input type="checkbox" name="roles" value="${esc(r)}"
+        ${have.includes(r) ? 'checked' : ''}> ${esc(r)}</label>`).join('')}</div>`;
+    return `<div class="f wide"><label>${esc(label)}</label>${body}</div>`;
+  }
+  if (type === 'area'){
+    const areas = [...new Set(D.people.map(p => p.area).filter(Boolean))].sort();
+    body = `<input type="text" name="${k}" value="${esc(val)}" list="arealist">
+      <datalist id="arealist">${areas.map(a => `<option value="${esc(a)}">`).join('')}</datalist>`;
+    return `<div class="f"><label>${esc(label)}</label>${body}</div>`;
+  }
+  if (type === 'tm'){
+    const tms = D.people.filter(p => isTM(p) || p.id === v)
+      .sort((a,b) => a.name.localeCompare(b.name));
+    body = `<select name="${k}"><option value="">—</option>${tms.map(p =>
+      `<option value="${p.id}" ${p.id === v ? 'selected' : ''}>${esc(personLabel(p))}</option>`
+      ).join('')}</select>`;
+    return `<div class="f"><label>${esc(label)}</label>${body}</div>`;
+  }
   if (type.startsWith('ref:')){
     const src = type.slice(4);
     body = `<select name="${k}"><option value="">—</option>${
@@ -838,7 +915,7 @@ function moneyTable(s){
 }
 
 // Which group of fields is the one to look at now.
-const FOCUS = {planning:['Where','Status'], build:['Dates','Build day'],
+const FOCUS = {planning:['Store','Status'], build:['Dates','Build day'],
                trading:['Money'], closed:['Money']};
 
 function sectionHtml(t, grp, fs, rec, phase){
@@ -889,11 +966,15 @@ function collect(t, rec){
   const form = document.getElementById('form');
   const out = {};
   TABLES[t].fields.forEach(([, fs]) => fs.forEach(([k, , type]) => {
+    if (type === 'roles'){
+      out.roles = [...form.querySelectorAll('input[name="roles"]:checked')].map(b => b.value);
+      return;
+    }
     const el = form.elements[k];
     if (!el) return;
     let v = el.value;
     if (v === '') { out[k] = null; return; }
-    if (type.startsWith('ref:')) out[k] = Number(v);
+    if (type === 'tm' || type.startsWith('ref:')) out[k] = Number(v);
     else if (type === 'bool') out[k] = v === 'true';
     else if (type === 'money' || type === 'number') out[k] = Number(v);
     else out[k] = v;
@@ -1008,7 +1089,13 @@ async function start(){
       document.getElementById('out2').onclick = async () => { await db.auth.signOut(); location.reload(); };
       return;
     }
-    filters.year = currentYear(); render();
+    filters.year = currentYear();
+    const saved = recallTM();
+    const me = D.people.find(p => isTM(p) && p.email &&
+      p.email.toLowerCase() === session.user.email.toLowerCase());
+    filters.tm = saved || (me ? String(me.id) : '');
+    if (filters.tm && !D.people.some(p => String(p.id) === String(filters.tm))) filters.tm = '';
+    render();
   }
   catch (e){ app.innerHTML = `<div class="empty-state">Could not load the data.<br>${esc(e.message)}</div>`; }
 }
