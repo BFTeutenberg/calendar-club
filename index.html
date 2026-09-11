@@ -218,6 +218,16 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
   text-decoration:none; color:var(--ink); font-size:14px; font-weight:600}
 .opcard a.call:hover{border-color:var(--accent); color:var(--accent)}
 .opcard .none{color:var(--muted); font-size:14px}
+.mapwrap{border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
+  background:var(--sink)}
+.mapwrap iframe{display:block; width:100%; height:280px; border:0}
+.shots{display:flex; flex-wrap:wrap; gap:10px}
+.shot{position:relative; margin:0; width:132px; height:132px; border-radius:var(--radius);
+  overflow:hidden; background:var(--sink); border:1px solid var(--line)}
+.shot img{width:100%; height:100%; object-fit:cover; display:block; cursor:pointer}
+.shot .x{position:absolute; top:4px; right:4px; width:26px; height:26px; border-radius:50%;
+  border:0; background:rgba(0,0,0,.6); color:#fff; font-size:16px; line-height:1; cursor:pointer}
+@media (max-width:620px){.shot{width:calc(50% - 5px); height:150px}}
 .copyrow{display:flex; gap:8px; flex-wrap:wrap}
 .copyrow select{flex:1 1 190px; min-width:0; padding:9px 11px; border:1px solid var(--line);
   border-radius:8px; background:var(--card)}
@@ -261,7 +271,7 @@ const esc = t => String(t ?? '').replace(/[&<>"']/g, c =>
 const TBL = {                  // short name in the app -> table in Supabase
   cities:'cc_cities', store_types:'cc_store_types', people:'cc_people',
   locations:'cc_locations', shops:'cc_shops', shop_people:'cc_shop_people',
-  members:'cc_members',
+  members:'cc_members', photos:'cc_photos',
 };
 let D = {};                    // every table, held in memory
 let myRole = null;             // admin, editor or viewer
@@ -467,10 +477,11 @@ async function loadAll(){
   myRole = mine.data ? mine.data.role : null;
   if (!myRole) return;
 
-  const names = ['cities','store_types','people','locations','shops','shop_people'];
+  const names = ['cities','store_types','people','locations','shops','shop_people','photos'];
   if (myRole === 'admin') names.push('members');
   const res = await Promise.all(names.map(n =>
-    db.from(TBL[n]).select('*').order(n === 'shop_people' ? 'id' : n === 'members' ? 'email' : 'name')));
+    db.from(TBL[n]).select('*')
+      .order(['shop_people','photos'].includes(n) ? 'id' : n === 'members' ? 'email' : 'name')));
   names.forEach((n, i) => {
     if (res[i].error) throw res[i].error;
     D[n] = res[i].data;
@@ -554,6 +565,154 @@ function shopsScreen(){
     <div id="list"></div>`;
 }
 
+/* ---------------------------------------------------------------- the map
+   Coordinates are stored as "lat,lon" text, so a mall with any of the three
+   positions filled in can be pinned without a mapping account. */
+function coordsOf(v){
+  const m = String(v == null ? '' : v).match(/(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)/);
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+function mapBlock(rec){
+  const spots = [
+    ['Store', rec.store_location], ['Delivery', rec.delivery_location],
+    ['Parking', rec.parking_location],
+  ].map(([l, v]) => [l, coordsOf(v)]).filter(([, c]) => c);
+
+  const address = [rec.street_address, nameOf('cities', rec.city_id), rec.postcode]
+    .filter(Boolean).join(', ');
+
+  if (!spots.length){
+    const q = encodeURIComponent(address || rec.name);
+    return `<section class="grp"><h3>Where it is</h3>
+      ${address ? `<p>${esc(address)}</p>` : '<p class="rmeta">No address yet.</p>'}
+      <p class="rmeta">No coordinates stored, so there's nothing to pin. Paste a
+      "latitude,longitude" pair into Store location and the map appears.</p>
+      <a class="btn" style="display:inline-block;margin-top:8px;text-decoration:none"
+        href="https://www.google.com/maps/search/?api=1&query=${q}"
+        target="_blank" rel="noopener">Search this address</a></section>`;
+  }
+
+  const [lat, lon] = spots[0][1];
+  const d = 0.004;
+  const bbox = [lon - d, lat - d/2, lon + d, lat + d/2].join(',');
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}` +
+              `&layer=mapnik&marker=${lat},${lon}`;
+  return `<section class="grp"><h3>Where it is</h3>
+    ${address ? `<p style="margin-bottom:10px">${esc(address)}</p>` : ''}
+    <div class="mapwrap"><iframe src="${src}" title="Map of ${esc(rec.name)}"
+      loading="lazy" referrerpolicy="no-referrer"></iframe></div>
+    <div class="addp" style="margin-top:10px">
+      ${spots.map(([label, c]) => `<a class="btn" style="text-decoration:none"
+        href="https://www.google.com/maps/dir/?api=1&destination=${c[0]},${c[1]}"
+        target="_blank" rel="noopener">Directions to ${esc(label.toLowerCase())}</a>`).join('')}
+      ${rec.parking_what3words && rec.parking_what3words.length > 16
+        ? `<a class="btn" style="text-decoration:none" href="${esc(rec.parking_what3words)}"
+           target="_blank" rel="noopener">what3words</a>` : ''}
+    </div></section>`;
+}
+
+/* ------------------------------------------------------- the centre contact */
+function contactBlock(rec){
+  const p = D.people.find(x => x.id === rec.contact_person_id);
+  if (!p) return `<section class="grp"><h3>Centre contact</h3>
+    <div class="rmeta">Nobody linked yet. Tap Edit and choose someone from the
+    People list — add them there first if they're not on it.</div></section>`;
+  const bits = [];
+  if (p.phone1) bits.push(`<a class="call" href="tel:${esc(p.phone1)}">${esc(p.phone1)}</a>`);
+  if (p.phone2) bits.push(`<a class="call" href="tel:${esc(p.phone2)}">${esc(p.phone2)}</a>`);
+  if (p.email) bits.push(`<a class="call" href="mailto:${esc(p.email)}">Email</a>`);
+  return `<section class="grp"><h3>Centre contact</h3>
+    <div class="opcard">
+      <span class="nm" data-goto="people:${p.id}">${esc(p.name)}</span>
+      <div class="contact">${bits.length ? bits.join('') :
+        '<span class="none">No phone or email on file</span>'}</div>
+    </div></section>`;
+}
+
+/* -------------------------------------------------------------- the photos */
+const photoURL = {};                    // path -> short-lived link
+
+const photosFor = (subject, id) => (D.photos || [])
+  .filter(p => p.subject === subject && p.subject_id === id)
+  .sort((a,b) => (a.created_at || '').localeCompare(b.created_at || ''));
+
+function photosBlock(subject, rec){
+  const list = photosFor(subject, rec.id);
+  const mayEdit = canEdit(subject === 'shops' ? 'shops' : subject);
+  return `<section class="grp"><h3>Photos</h3>
+    <div class="shots" id="shots">${list.length ? list.map(ph => `
+      <figure class="shot" data-path="${esc(ph.path)}">
+        <img alt="${esc(ph.caption || rec.name)}" data-path="${esc(ph.path)}">
+        ${mayEdit ? `<button type="button" class="x" data-delphoto="${ph.id}"
+          title="Remove">×</button>` : ''}
+      </figure>`).join('') : '<div class="rmeta">No photos yet.</div>'}</div>
+    ${!mayEdit ? '' : `<div class="addp" style="margin-top:10px">
+      <input type="file" id="photofile" accept="image/*" style="display:none">
+      <button type="button" class="btn" id="addphoto">Add a photo</button>
+      <span class="rmeta" id="photostatus"></span>
+    </div>`}</section>`;
+}
+
+// Phone photos are far bigger than they need to be here.
+async function shrinkImage(file){
+  if (!/^image\//.test(file.type)) throw new Error('That file isn\'t an image.');
+  if (typeof createImageBitmap !== 'function') return file;
+  const bmp = await createImageBitmap(file);
+  const max = 1600, scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.82));
+  return blob || file;
+}
+
+async function showPhotos(){
+  const imgs = [...document.querySelectorAll('#shots img[data-path]')];
+  const missing = imgs.map(i => i.dataset.path).filter(p => !photoURL[p]);
+  if (missing.length){
+    try {
+      const {data} = await db.storage.from('cc-photos').createSignedUrls(missing, 3600);
+      (data || []).forEach(d => { if (d.signedUrl) photoURL[d.path] = d.signedUrl; });
+    } catch (e){ /* leave them blank rather than break the page */ }
+  }
+  imgs.forEach(i => { if (photoURL[i.dataset.path]) i.src = photoURL[i.dataset.path]; });
+}
+
+async function addPhoto(subject, id, file){
+  const status = document.getElementById('photostatus');
+  const say = t => { if (status) status.textContent = t; };
+  try {
+    say('Preparing…');
+    const blob = await shrinkImage(file);
+    const path = `${subject}/${id}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
+    say('Uploading…');
+    const up = await db.storage.from('cc-photos')
+      .upload(path, blob, {contentType:'image/jpeg', upsert:false});
+    if (up.error) throw up.error;
+    const {data, error} = await db.from('cc_photos')
+      .insert({subject, subject_id:id, path}).select().single();
+    if (error) throw error;
+    D.photos.push(data);
+    say('');
+    drawSheet();
+  } catch (e){
+    say('Could not add it: ' + e.message);
+  }
+}
+
+async function removePhoto(photoId){
+  const ph = (D.photos || []).find(p => p.id === photoId);
+  if (!ph) return;
+  const {error} = await db.from('cc_photos').delete().eq('id', photoId);
+  if (error){ toast('Could not remove it'); return; }
+  await db.storage.from('cc-photos').remove([ph.path]);
+  D.photos = D.photos.filter(p => p.id !== photoId);
+  delete photoURL[ph.path];
+  drawSheet();
+}
+
 function helpScreen(){
   const can = canEdit('shops');
   const q = (h, body) => `<section class="grp"><h3>${h}</h3>${body}</section>`;
@@ -616,8 +775,15 @@ function helpScreen(){
       Store Staff, TM, Management and Centre Management ticked. Somebody can be a TM
       and still build. Only people with TM ticked appear in the TM dropdown and the
       area filter.</p>
-      <p><b>Malls</b> holds the centres, with parking notes, charges and what3words.
-      Where coordinates are stored you get an "Open in maps" link.</p>
+      <p><b>Malls</b> holds the centres. Each one shows its address on a map with a pin,
+      directions to the store, the delivery point and the parking, and the centre
+      contact with tappable phone and email. The contact is chosen from the People
+      list, so add them there first if they're not on it. The pin comes from the
+      "latitude,longitude" pairs in the location fields — paste one in and the map
+      appears.</p>
+      <p><b>Photos</b> can be added to any store, person or mall. They're resized on
+      your device before uploading, and they're private: the app fetches a link that
+      expires after an hour, so a photo address can't be passed around.</p>
       <p><b>Types</b> feeds the store type dropdown. Types are never deleted — set
       <b>Still in use</b> to No and it drops out of the dropdown while staying on the
       stores that already have it. The <b>Builders required</b> number is what drives
@@ -650,6 +816,8 @@ function helpScreen(){
     ${q('If something goes wrong', `
       <p>Signed in but seeing nothing? Your email hasn't been added to the access list
       yet — ask Barry.</p>
+      <p>Can't delete a city, mall or person? Something is still using it. The message
+      says what — change those over first and the delete button comes back.</p>
       <p>Page looks stale or odd? Sign out and back in, which reloads everything.</p>
       <p>Can't save a change? Your access is probably view only.</p>`)}`;
 }
@@ -1295,13 +1463,26 @@ function drawSheet(){
         ${TABLES[t].fields.map(([grp, fs]) => {
           const phase = t === 'shops' && openRec.id ? phaseOf(rec) : null;
           const html = sectionHtml(t, grp, fs, rec, phase);
-          return t === 'shops' && grp === 'Store' ? html + operatorSection(rec) : html;
+          if (t === 'shops' && grp === 'Store') return html + operatorSection(rec);
+          if (t === 'locations' && grp === 'The centre' && openRec.id)
+            return html + contactBlock(rec) + mapBlock(rec);
+          return html;
         }).join('')}
+        ${openRec.id && ['shops','people','locations'].includes(t) ? photosBlock(t, rec) : ''}
         ${t === 'shops' && openRec.id ? peopleBlock(rec) : ''}
         ${t === 'people' && openRec.id ? storesBlock(rec) : ''}
       </form>
-      ${openRec.id && mayEdit && t !== 'store_types'
-        ? `<button class="btn" id="del" style="margin-top:26px; color:var(--accent)">Delete this ${TABLES[t].single.toLowerCase()}</button>` : ''}
+      ${(() => {
+        if (!openRec.id || !mayEdit || t === 'store_types') return '';
+        const used = inUse(t, openRec.id);
+        if (!used.length) return `<button class="btn" id="del" style="margin-top:26px;
+          color:var(--accent)">Delete this ${TABLES[t].single.toLowerCase()}</button>`;
+        return `<div class="grp" style="margin-top:26px">
+          <h3>Can't be deleted</h3>
+          <p>${esc(TABLES[t].single)} is in use by ${esc(usedSummary(used))}.</p>
+          <p class="rmeta">Change those over to something else first, and the delete
+          button will appear.</p></div>`;
+      })()}
       ${openRec.id && mayEdit && t === 'store_types'
         ? `<p class="rmeta" style="margin-top:22px">Store types aren't deleted. Set
            <b>Still in use</b> to No to keep it out of the dropdown while leaving it
@@ -1331,6 +1512,21 @@ function drawSheet(){
     const pid = Number(el.querySelector('#opsel').value);
     if (pid) link(rec.id, pid, 'Operator');
   };
+  el.querySelectorAll('[data-delphoto]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    removePhoto(Number(b.dataset.delphoto));
+  });
+  el.querySelectorAll('#shots img').forEach(img => img.onclick = () => {
+    const u = photoURL[img.dataset.path];
+    if (u) window.open(u, '_blank', 'noopener');
+  });
+  const ap = el.querySelector('#addphoto');
+  if (ap){
+    const inp = el.querySelector('#photofile');
+    ap.onclick = () => inp.click();
+    inp.onchange = () => { if (inp.files[0]) addPhoto(t, rec.id, inp.files[0]); };
+  }
+  if (el.querySelector('#shots img')) showPhotos();
   const cp = el.querySelector('#copyfrom');
   if (cp) cp.onchange = () => applyCopy(Number(cp.value) || null);
   const cc = el.querySelector('#copycity');
@@ -1389,6 +1585,33 @@ function applyCopy(id){
   set('location_id', src.location_id);
   set('type_id', src.type_id);
   set('tm_id', src.tm_id);
+}
+
+// What would break if this record vanished.
+function inUse(t, id){
+  if (t === 'cities') return [
+    ...D.shops.filter(x => x.city_id === id).map(x => ['store', x.name]),
+    ...D.locations.filter(x => x.city_id === id).map(x => ['mall', x.name]),
+    ...D.people.filter(x => x.city_id === id).map(x => ['person', x.name]),
+  ];
+  if (t === 'locations') return D.shops.filter(x => x.location_id === id).map(x => ['store', x.name]);
+  if (t === 'people') return [
+    ...(D.shop_people || []).filter(l => l.person_id === id)
+      .map(l => ['store', nameOf('shops', l.shop_id) ||
+        ((D.shops.find(s => s.id === l.shop_id) || {}).name || 'a store')]),
+    ...D.shops.filter(x => x.tm_id === id).map(x => ['store', x.name]),
+    ...D.locations.filter(x => x.contact_person_id === id).map(x => ['mall', x.name]),
+  ];
+  return [];
+}
+
+function usedSummary(used){
+  const counts = {};
+  used.forEach(([kind]) => counts[kind] = (counts[kind] || 0) + 1);
+  const bits = Object.entries(counts).map(([k, n]) =>
+    `${n} ${k}${n === 1 ? '' : k === 'person' ? 's' : 's'}`);
+  const names = [...new Set(used.map(u => u[1]))].slice(0, 4).join(', ');
+  return bits.join(' and ') + (names ? ' — ' + names + (used.length > 4 ? ' and others' : '') : '');
 }
 
 function closeSheet(){
