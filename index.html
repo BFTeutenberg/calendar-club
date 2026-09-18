@@ -86,7 +86,29 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 .row{
   width:100%; text-align:left; background:var(--card); border:1px solid var(--line);
   border-radius:var(--radius); padding:13px 15px; cursor:pointer; display:block;
+  position:relative; touch-action:pan-y;
 }
+.row.flash{border-color:var(--accent); box-shadow:inset 3px 0 0 var(--accent)}
+.rowcalls{display:inline-flex; gap:6px; vertical-align:middle; margin-left:2px}
+.rowcalls a{
+  display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px;
+  border-radius:50%; border:1px solid var(--line); background:var(--paper); color:var(--muted);
+  text-decoration:none;
+}
+.rowcalls a:hover{border-color:var(--accent); color:var(--accent)}
+.rowcalls a.wa{color:var(--live); border-color:color-mix(in srgb,var(--live) 35%,var(--line))}
+.rowcalls svg{width:17px; height:17px; fill:currentColor}
+.avatar{
+  display:inline-block; width:34px; height:34px; border-radius:50%; overflow:hidden;
+  background:var(--sink); border:1px solid var(--line); vertical-align:middle;
+  margin-right:10px; flex:0 0 auto;
+}
+.avatar img{width:100%; height:100%; object-fit:cover; display:block}
+.avatar.big{width:64px; height:64px}
+.shot.isprofile{outline:3px solid var(--accent); outline-offset:-3px}
+.shot .star{position:absolute; bottom:4px; left:4px; border:0; border-radius:20px;
+  background:rgba(0,0,0,.6); color:#fff; font-size:11px; font-weight:600;
+  padding:3px 9px; cursor:pointer}
 .row:hover{border-color:var(--muted)}
 .row:focus-visible,.btn:focus-visible,nav button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 .row h3{font-size:16.5px}
@@ -253,8 +275,8 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 
 <!-- ============ SETTINGS: paste your two Supabase values here ============ -->
 <script>
-const SUPABASE_URL = 'https://uloptfmzydaxymhecuub.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_ffHo4CL3bl3m207Cjpf6RA_qqYIxUzc';
+const SUPABASE_URL = "https://YOUR-PROJECT-ID.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-KEY";
 </script>
 <!-- ====================================================================== -->
 
@@ -642,14 +664,17 @@ function photosBlock(subject, rec){
   const mayEdit = canEdit(subject === 'shops' ? 'shops' : subject);
   return `<section class="grp"><h3>Photos</h3>
     <div class="shots" id="shots">${list.length ? list.map(ph => `
-      <figure class="shot" data-path="${esc(ph.path)}">
+      <figure class="shot${ph.is_profile ? ' isprofile' : ''}" data-path="${esc(ph.path)}">
         <img alt="${esc(ph.caption || rec.name)}" data-path="${esc(ph.path)}">
         ${mayEdit ? `<button type="button" class="x" data-delphoto="${ph.id}"
           title="Remove">×</button>` : ''}
+        ${mayEdit && !ph.is_profile ? `<button type="button" class="star"
+          data-profile="${ph.id}">Use as main</button>` : ''}
+        ${ph.is_profile ? '<button type="button" class="star" disabled>Main</button>' : ''}
       </figure>`).join('') : '<div class="rmeta">No photos yet.</div>'}</div>
     ${!mayEdit ? '' : `<div class="addp" style="margin-top:10px">
-      <input type="file" id="photofile" accept="image/*" style="display:none">
-      <button type="button" class="btn" id="addphoto">Add a photo</button>
+      <input type="file" id="photofile" accept="image/*" multiple style="display:none">
+      <button type="button" class="btn" id="addphoto">Add photos</button>
       <span class="rmeta" id="photostatus"></span>
     </div>`}</section>`;
 }
@@ -668,8 +693,8 @@ async function shrinkImage(file){
   return blob || file;
 }
 
-async function showPhotos(){
-  const imgs = [...document.querySelectorAll('#shots img[data-path]')];
+async function fillPhotos(){
+  const imgs = [...document.querySelectorAll('img[data-path]')].filter(i => !i.src);
   const missing = imgs.map(i => i.dataset.path).filter(p => !photoURL[p]);
   if (missing.length){
     try {
@@ -680,26 +705,58 @@ async function showPhotos(){
   imgs.forEach(i => { if (photoURL[i.dataset.path]) i.src = photoURL[i.dataset.path]; });
 }
 
-async function addPhoto(subject, id, file){
+async function addPhotos(subject, id, files){
   const status = document.getElementById('photostatus');
   const say = t => { if (status) status.textContent = t; };
-  try {
-    say('Preparing…');
-    const blob = await shrinkImage(file);
-    const path = `${subject}/${id}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
-    say('Uploading…');
-    const up = await db.storage.from('cc-photos')
-      .upload(path, blob, {contentType:'image/jpeg', upsert:false});
-    if (up.error) throw up.error;
-    const {data, error} = await db.from('cc_photos')
-      .insert({subject, subject_id:id, path}).select().single();
-    if (error) throw error;
-    D.photos.push(data);
-    say('');
-    drawSheet();
-  } catch (e){
-    say('Could not add it: ' + e.message);
+  const list = [...files];
+  let done = 0, failed = 0;
+  for (const file of list){
+    say(list.length > 1 ? `Adding ${done + 1} of ${list.length}…` : 'Adding…');
+    try {
+      const blob = await shrinkImage(file);
+      const path = `${subject}/${id}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
+      const up = await db.storage.from('cc-photos')
+        .upload(path, blob, {contentType:'image/jpeg', upsert:false});
+      if (up.error) throw up.error;
+      const {data, error} = await db.from('cc_photos')
+        .insert({subject, subject_id:id, path}).select().single();
+      if (error) throw error;
+      D.photos.push(data);
+      done++;
+    } catch (e){
+      failed++;
+      say('Could not add ' + file.name + ': ' + e.message);
+    }
   }
+  drawSheet();
+  const st = document.getElementById('photostatus');
+  if (st) st.textContent = failed ? `${done} added, ${failed} failed` : '';
+}
+
+// One photo per record is the one shown in lists and on the operator card.
+async function makeProfile(photoId){
+  const ph = (D.photos || []).find(p => p.id === photoId);
+  if (!ph) return;
+  const others = (D.photos || []).filter(p =>
+    p.subject === ph.subject && p.subject_id === ph.subject_id && p.is_profile);
+  for (const o of others){
+    const {error} = await db.from('cc_photos').update({is_profile:false}).eq('id', o.id);
+    if (!error) o.is_profile = false;
+  }
+  const {data, error} = await db.from('cc_photos')
+    .update({is_profile:true}).eq('id', photoId).select().single();
+  if (error){ toast('Could not set it'); return; }
+  Object.assign(ph, data);
+  drawSheet();
+}
+
+const profilePhoto = (subject, id) => (D.photos || [])
+  .find(p => p.subject === subject && p.subject_id === id && p.is_profile);
+
+function avatar(subject, id, big){
+  const ph = profilePhoto(subject, id);
+  if (!ph) return '';
+  return `<span class="avatar${big ? ' big' : ''}"><img data-path="${esc(ph.path)}" alt=""></span>`;
 }
 
 async function removePhoto(photoId){
@@ -711,6 +768,62 @@ async function removePhoto(photoId){
   D.photos = D.photos.filter(p => p.id !== photoId);
   delete photoURL[ph.path];
   drawSheet();
+}
+
+/* ----------------------------------------------------------------- swiping
+   Swipe a store card sideways to see the same store in the next or previous
+   season. The sort and filters stay put, and the store you swiped is brought
+   back into view and briefly outlined. */
+let swipeWired = null;
+
+function seasonList(){
+  return [...new Set(D.shops.map(s => s.operating_year).filter(Boolean))].sort();
+}
+
+function hopSeason(dir, storeName){
+  const years = seasonList();
+  const here = years.indexOf(filters.year);
+  if (here < 0) return;
+  const next = years[here + dir];
+  if (!next){
+    toast(dir > 0 ? 'No later season yet' : 'No earlier season');
+    return;
+  }
+  filters.year = next;
+  render();
+  const rows = [...document.querySelectorAll('#list .row')];
+  const match = rows.find(r => r.dataset.name === storeName);
+  if (match){
+    match.scrollIntoView({block:'center', behavior:'smooth'});
+    match.classList.add('flash');
+    setTimeout(() => match.classList.remove('flash'), 1600);
+    toast(next);
+  } else {
+    toast(`${storeName} isn't in ${next}`);
+  }
+}
+
+function wireSwipe(box){
+  if (swipeWired === box) return;
+  swipeWired = box;
+  let x0 = 0, y0 = 0, name = null;
+
+  box.addEventListener('touchstart', e => {
+    const row = e.target.closest('.row');
+    if (!row || e.touches.length !== 1){ name = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
+    name = row.dataset.name;
+  }, {passive:true});
+
+  box.addEventListener('touchend', e => {
+    if (!name) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    const who = name; name = null;
+    // Sideways, decisively, and more sideways than up and down.
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+    hopSeason(dx < 0 ? 1 : -1, who);
+  }, {passive:true});
 }
 
 function helpScreen(){
@@ -731,7 +844,14 @@ function helpScreen(){
       next time you sign in on that device.</p>
       <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
       date is the default. Tick <b>Default</b> beside it to open on a different order
-      next time.</p>`)}
+      next time.</p>
+      <p>On a phone, <b>swipe a store card sideways</b> to see the same store in the next
+      or previous season. Left goes forward a year, right goes back. The sort and
+      filters stay as they are and the store you swiped is scrolled to and outlined.
+      It needs a season chosen rather than "All years".</p>
+      <p>Where a store has an operator with a number on file, the card carries a phone
+      button and a WhatsApp button. Both work straight from the list, without opening
+      the store.</p>`)}
 
     ${q('Reading a store', `
       <p>The block at the top changes with the season. Before opening it shows the
@@ -781,9 +901,11 @@ function helpScreen(){
       list, so add them there first if they're not on it. The pin comes from the
       "latitude,longitude" pairs in the location fields — paste one in and the map
       appears.</p>
-      <p><b>Photos</b> can be added to any store, person or mall. They're resized on
-      your device before uploading, and they're private: the app fetches a link that
-      expires after an hour, so a photo address can't be passed around.</p>
+      <p><b>Photos</b> can be added to any store, person or mall — pick several at once
+      if you like. They're resized on your device before uploading, and they're
+      private: the app fetches a link that expires after an hour, so a photo address
+      can't be passed around. <b>Use as main</b> under a photo makes it the one shown
+      beside that person in lists, on their own page and on the operator card.</p>
       <p><b>Types</b> feeds the store type dropdown. Types are never deleted — set
       <b>Still in use</b> to No and it drops out of the dropdown while staying on the
       stores that already have it. The <b>Builders required</b> number is what drives
@@ -1341,9 +1463,16 @@ function drawList(){
   box.innerHTML = items.length
     ? `<p class="count">${items.length} ${items.length === 1 ? 'record' : 'records'}</p><div class="rows">${html}</div>`
     : `<div class="empty-state">Nothing matches “${esc(filters.q)}”. Try fewer words.</div>`;
-  box.querySelectorAll('.row').forEach(r => r.onclick = () => {
-    openRec = {table:tab, id:Number(r.dataset.id)}; editing = false; drawSheet();
+  box.querySelectorAll('.row').forEach(r => {
+    const open = e => {
+      if (e.target.closest('a')) return;        // a tap on a call button isn't a tap on the card
+      openRec = {table:tab, id:Number(r.dataset.id)}; editing = false; drawSheet();
+    };
+    r.onclick = open;
+    r.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(e); } };
   });
+  if (tab === 'shops') wireSwipe(box);
+  fillPhotos();
 }
 
 function tradingWindow(s){
@@ -1383,20 +1512,50 @@ function shopRow(s){
           s.commission_pct != null ? ` at ${s.commission_pct}%` : ''}</span>` : ''}`
     : `${days ? `<span>${days} days open</span>` : ''}
        ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
+          s.commission_pct != null ? ` at ${s.commission_pct}%` : ''}${
           d != null ? ` <span class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '−'}${money(Math.abs(d))}${
             v != null ? ` (${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%)` : ''}</span>` : ''}</span>` : ''}`;
 
+  const opPerson = on.filter(p => p.role === 'Operator')
+    .map(l => D.people.find(x => x.id === l.person_id))
+    .find(p => p && (p.phone1 || p.phone2));
+
   return `
-    <button class="row" data-id="${s.id}">
+    <div class="row" data-id="${s.id}" data-name="${esc(s.name)}" role="button" tabindex="0">
       <h3>${esc(s.name)}</h3>
       <div class="rmeta">${esc([nameOf('store_types', s.type_id), s.operating_year,
-        ops.length ? ops.join(' & ') : 'No operator'].filter(Boolean).join(' · '))}</div>
+        ops.length ? ops.join(' & ') : 'No operator'].filter(Boolean).join(' · '))}
+        ${opPerson ? callButtons(opPerson) : ''}</div>
       <div class="rfoot">
         <span class="tag ${cls}">${esc(s.store_status || PHASE_LABEL[phase])}</span>
         ${foot}
       </div>
       ${tradingWindow(s)}
-    </button>`;
+    </div>`;
+}
+
+// WhatsApp wants a full international number with no punctuation.
+function waNumber(n){
+  let d = String(n == null ? '' : n).replace(/[^\d+]/g, '');
+  if (!d) return null;
+  if (d.startsWith('+')) d = d.slice(1);
+  else if (d.startsWith('00')) d = d.slice(2);
+  else if (d.startsWith('0')) d = '44' + d.slice(1);
+  return d.length >= 9 ? d : null;
+}
+
+const ICON_PHONE = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.2.4 2.4.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.4 0 .8-.2 1l-2.3 2.2z"/></svg>`;
+const ICON_WA = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.3A10 10 0 1 0 12 2zm5.2 14.1c-.2.6-1.2 1.2-1.7 1.2-.5.1-1 .1-1.6-.1a12 12 0 0 1-5.8-5c-.4-.7-.7-1.5-.7-2.3 0-.8.4-1.4.8-1.7.2-.2.4-.3.6-.3h.5c.2 0 .4 0 .5.4l.8 1.8c0 .2 0 .3-.1.5l-.4.5c-.1.2-.3.3-.1.6.5.9 1.3 1.7 2.3 2.2.3.2.4.1.6-.1l.6-.7c.2-.2.3-.2.5-.1l1.7.8c.2.1.3.2.3.3v.6z"/></svg>`;
+
+function callButtons(p){
+  const num = p.phone1 || p.phone2;
+  const wa = waNumber(num);
+  return `<div class="rowcalls">
+    <a href="tel:${esc(num)}" title="Call ${esc(p.name)}"
+      aria-label="Call ${esc(p.name)}">${ICON_PHONE}</a>
+    ${wa ? `<a class="wa" href="https://wa.me/${wa}" target="_blank" rel="noopener"
+      title="WhatsApp ${esc(p.name)}" aria-label="WhatsApp ${esc(p.name)}">${ICON_WA}</a>` : ''}
+  </div>`;
 }
 
 function plainRow(t, r){
@@ -1418,8 +1577,15 @@ function plainRow(t, r){
                   : r.role === 'editor' ? 'Can change records' : 'Can look, not change']
       .filter(Boolean).join(' · ');
   }
-  return `<button class="row" data-id="${r.id}"><h3>${esc(titleOf(t, r))}</h3>
-          ${meta ? `<div class="rmeta">${esc(meta)}</div>` : ''}</button>`;
+  const face = t === 'people' ? avatar('people', r.id) : '';
+  return `<div class="row" data-id="${r.id}" role="button" tabindex="0">
+    <div style="display:flex; align-items:center">
+      ${face}
+      <div style="min-width:0">
+        <h3>${esc(titleOf(t, r))}</h3>
+        ${meta ? `<div class="rmeta">${esc(meta)}</div>` : ''}
+      </div>
+    </div></div>`;
 }
 
 /* ------------------------------------------------------------- the record */
@@ -1455,7 +1621,7 @@ function drawSheet(){
       </div>
     </div>
     <div class="wrap">
-      <h2 class="detail">${esc(title)}</h2>
+      <h2 class="detail">${t === 'people' && openRec.id ? avatar('people', rec.id, true) + ' ' : ''}${esc(title)}</h2>
       ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}
       ${t === 'shops' && !openRec.id ? copyPicker() : ''}
       <form id="form" autocomplete="off">
@@ -1512,6 +1678,10 @@ function drawSheet(){
     const pid = Number(el.querySelector('#opsel').value);
     if (pid) link(rec.id, pid, 'Operator');
   };
+  el.querySelectorAll('[data-profile]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    makeProfile(Number(b.dataset.profile));
+  });
   el.querySelectorAll('[data-delphoto]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     removePhoto(Number(b.dataset.delphoto));
@@ -1524,9 +1694,9 @@ function drawSheet(){
   if (ap){
     const inp = el.querySelector('#photofile');
     ap.onclick = () => inp.click();
-    inp.onchange = () => { if (inp.files[0]) addPhoto(t, rec.id, inp.files[0]); };
+    inp.onchange = () => { if (inp.files.length) addPhotos(t, rec.id, inp.files); };
   }
-  if (el.querySelector('#shots img')) showPhotos();
+  fillPhotos();
   const cp = el.querySelector('#copyfrom');
   if (cp) cp.onchange = () => applyCopy(Number(cp.value) || null);
   const cc = el.querySelector('#copycity');
@@ -1617,6 +1787,7 @@ function usedSummary(used){
 function closeSheet(){
   openRec = null; editing = false;
   document.getElementById('sheet')?.remove();
+  drawList();     // photos or links may have changed while it was open
 }
 
 function fieldHtml([k, label, type], rec){
@@ -1825,6 +1996,7 @@ function operatorSection(rec){
     if (p.phone2) bits.push(`<a class="call" href="tel:${esc(p.phone2)}">${esc(p.phone2)}</a>`);
     if (p.email) bits.push(`<a class="call" href="mailto:${esc(p.email)}">Email</a>`);
     return `<div class="opcard">
+      ${avatar('people', p.id)}
       <span class="nm" data-goto="people:${p.id}">${esc(p.name || 'Unknown')}</span>
       <div class="contact">${bits.length ? bits.join('') :
         '<span class="none">No phone or email on file</span>'}</div>
