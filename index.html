@@ -88,7 +88,12 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
   border-radius:var(--radius); padding:13px 15px; cursor:pointer; display:block;
   position:relative; touch-action:pan-y;
 }
-.row.flash{border-color:var(--accent); box-shadow:inset 3px 0 0 var(--accent)}
+.row{border-left-width:5px; border-left-style:solid}
+.row.flash{box-shadow:0 0 0 2px var(--rowink) inset}
+.yearbar{display:flex; align-items:center; gap:10px; margin-bottom:2px}
+.yearbar .dot{width:12px; height:12px; border-radius:50%; flex:0 0 auto}
+.season .yr{line-height:1}
+.filter.yearsel{border-left:5px solid var(--yearink)}
 .rowcalls{display:inline-flex; gap:6px; vertical-align:middle; margin-left:2px}
 .rowcalls a{
   display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px;
@@ -553,7 +558,11 @@ function shopsScreen(){
 
   return `
     <div class="season">
-      <div><div class="yr">${esc(filters.year || 'All years')}</div></div>
+      <div><div class="yearbar">
+        ${filters.year ? `<span class="dot" style="background:${seasonInk(filters.year)}"></span>` : ''}
+        <div class="yr" style="color:${filters.year ? seasonInk(filters.year) : 'inherit'}">${
+          esc(filters.year || 'All years')}</div>
+      </div></div>
       <div class="stat"><b>${inYear.length}</b><span>stores</span></div>
       <div class="stat"><b>${money(bud)}</b><span>budget</span></div>
       <div class="stat"><b>${money(act)}</b><span>actual</span></div>
@@ -561,7 +570,8 @@ function shopsScreen(){
     </div>
     <div class="controls">
       <input class="search" id="q" placeholder="Search store, city, mall or person" value="${esc(filters.q)}">
-      <select class="filter" id="year">
+      <select class="filter yearsel" id="year" style="--yearink:${
+        filters.year ? seasonInk(filters.year) : 'var(--line)'}">
         <option value="">All years</option>
         ${years.map(y => `<option ${y===filters.year?'selected':''}>${esc(y)}</option>`).join('')}
       </select>
@@ -776,6 +786,15 @@ async function removePhoto(photoId){
    back into view and briefly outlined. */
 let swipeWired = null;
 
+// Each season gets its own hue, so it's obvious at a glance which one you're in.
+const SEASON_HUES = [4, 205, 150, 275, 32, 320, 185, 95];
+function seasonHue(year){
+  const list = seasonList();
+  const i = list.indexOf(year);
+  return SEASON_HUES[(i < 0 ? 0 : i) % SEASON_HUES.length];
+}
+const seasonInk = year => `hsl(${seasonHue(year)} 62% 46%)`;
+
 function seasonList(){
   return [...new Set(D.shops.map(s => s.operating_year).filter(Boolean))].sort();
 }
@@ -794,9 +813,10 @@ function hopSeason(dir, storeName){
   const rows = [...document.querySelectorAll('#list .row')];
   const match = rows.find(r => r.dataset.name === storeName);
   if (match){
-    match.scrollIntoView({block:'center', behavior:'smooth'});
+    if (typeof match.scrollIntoView === 'function')
+      match.scrollIntoView({block:'center', behavior:'smooth'});
     match.classList.add('flash');
-    setTimeout(() => match.classList.remove('flash'), 1600);
+    setTimeout(() => match.classList.remove('flash'), 2600);
     toast(next);
   } else {
     toast(`${storeName} isn't in ${next}`);
@@ -822,7 +842,8 @@ function wireSwipe(box){
     const who = name; name = null;
     // Sideways, decisively, and more sideways than up and down.
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
-    hopSeason(dx < 0 ? 1 : -1, who);
+    // Dragging right to left steps back a season; left to right goes forward.
+    hopSeason(dx < 0 ? -1 : 1, who);
   }, {passive:true});
 }
 
@@ -845,10 +866,14 @@ function helpScreen(){
       <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
       date is the default. Tick <b>Default</b> beside it to open on a different order
       next time.</p>
-      <p>On a phone, <b>swipe a store card sideways</b> to see the same store in the next
-      or previous season. Left goes forward a year, right goes back. The sort and
-      filters stay as they are and the store you swiped is scrolled to and outlined.
-      It needs a season chosen rather than "All years".</p>
+      <p>On a phone, <b>swipe a store card sideways</b> to see the same store in another
+      season. Dragging right to left steps back a year, left to right goes forward. The
+      sort and filters stay as they are, and the store you swiped is scrolled to and
+      outlined for a couple of seconds. It needs a season chosen rather than "All
+      years".</p>
+      <p>Every season has its own colour. It runs down the left edge of each card, and
+      the season number at the top of the screen is in the same colour, so you can tell
+      at a glance which year you're looking at.</p>
       <p>Where a store has an operator with a number on file, the card carries a phone
       button and a WhatsApp button. Both work straight from the list, without opening
       the store.</p>`)}
@@ -1509,10 +1534,10 @@ function shopRow(s){
        ${need ? `<span class="${builders.length >= need ? 'money' : ''}">${
           builders.length} of ${need} builders</span>` : ''}
        ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
-          s.commission_pct != null ? ` at ${s.commission_pct}%` : ''}</span>` : ''}`
+          s.commission_pct != null ? ` at ${s.commission_pct}% = ${money(budgetAmt(s))}` : ''}</span>` : ''}`
     : `${days ? `<span>${days} days open</span>` : ''}
        ${s.budget != null ? `<span class="money">${money(s.budget)} budget${
-          s.commission_pct != null ? ` at ${s.commission_pct}%` : ''}${
+          s.commission_pct != null ? ` at ${s.commission_pct}% = ${money(budgetAmt(s))}` : ''}${
           d != null ? ` <span class="${d >= 0 ? 'pos' : 'neg'}">${d >= 0 ? '+' : '−'}${money(Math.abs(d))}${
             v != null ? ` (${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}%)` : ''}</span>` : ''}</span>` : ''}`;
 
@@ -1521,10 +1546,11 @@ function shopRow(s){
     .find(p => p && (p.phone1 || p.phone2));
 
   return `
-    <div class="row" data-id="${s.id}" data-name="${esc(s.name)}" role="button" tabindex="0">
+    <div class="row" data-id="${s.id}" data-name="${esc(s.name)}" role="button" tabindex="0"
+      style="border-left-color:${seasonInk(s.operating_year)}; --rowink:${seasonInk(s.operating_year)}">
       <h3>${esc(s.name)}</h3>
-      <div class="rmeta">${esc([nameOf('store_types', s.type_id), s.operating_year,
-        ops.length ? ops.join(' & ') : 'No operator'].filter(Boolean).join(' · '))}
+      <div class="rmeta">${esc([ops.length ? ops.join(' & ') : 'No operator',
+        nameOf('store_types', s.type_id), s.operating_year].filter(Boolean).join(' · '))}
         ${opPerson ? callButtons(opPerson) : ''}</div>
       <div class="rfoot">
         <span class="tag ${cls}">${esc(s.store_status || PHASE_LABEL[phase])}</span>
