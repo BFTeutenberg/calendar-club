@@ -47,13 +47,46 @@ header.top{
 .brand em{font-style:normal; color:var(--accent)}
 .who{margin-left:auto; font-size:13px; color:var(--muted)}
 .who button{background:none; border:0; color:var(--muted); text-decoration:underline; cursor:pointer; padding:0 0 0 10px}
-nav{max-width:940px; margin:0 auto; padding:8px 16px 0; display:flex; gap:2px; overflow-x:auto; scrollbar-width:none}
-nav::-webkit-scrollbar{display:none}
-nav button{
-  background:none; border:0; border-bottom:2px solid transparent; padding:8px 12px 10px;
-  color:var(--muted); cursor:pointer; white-space:nowrap; font-weight:500;
+/* the menu button and its panel */
+.menubtn{
+  margin-left:auto; width:42px; height:42px; border-radius:10px; border:1px solid var(--line);
+  background:var(--card); cursor:pointer; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:4px; flex:0 0 auto;
 }
-nav button[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+.menubtn i{display:block; width:18px; height:2px; background:var(--ink); border-radius:2px}
+.menu{
+  position:absolute; right:16px; top:calc(100% - 6px); z-index:40; min-width:210px;
+  background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:0 10px 30px rgba(0,0,0,.18); padding:6px; display:none;
+}
+.menu.on{display:block}
+.menu button{
+  display:block; width:100%; text-align:left; background:none; border:0; cursor:pointer;
+  padding:11px 13px; border-radius:8px; color:var(--ink); font-weight:500; font-size:15.5px;
+}
+.menu button:hover{background:var(--sink)}
+.menu button[aria-selected="true"]{color:var(--accent); font-weight:700}
+.menu hr{border:0; border-top:1px solid var(--line); margin:6px 4px}
+.menu .who2{padding:8px 13px 4px; font-size:12.5px; color:var(--muted); word-break:break-all}
+
+/* the year, pinned at the top and swipeable */
+.yearhead{max-width:940px; margin:0 auto; padding:2px 16px 12px; touch-action:pan-y}
+.yearrow{display:flex; align-items:center; gap:12px}
+.yearrow .dot{width:14px; height:14px; border-radius:50%; flex:0 0 auto}
+.yearrow .yr{font-size:30px; font-weight:700; letter-spacing:-0.03em; line-height:1}
+.yearrow .cnt{font-size:13.5px; color:var(--muted); margin-left:auto; text-align:right; line-height:1.25}
+.yearrow .cnt b{display:block; font-size:19px; font-weight:700; color:var(--ink)}
+.yearhead .search{width:100%; margin-top:10px}
+.yearhint{font-size:11.5px; color:var(--muted); margin:6px 0 0}
+
+/* add button */
+.fab{
+  position:fixed; right:18px; bottom:calc(20px + env(safe-area-inset-bottom));
+  width:58px; height:58px; border-radius:50%; background:var(--accent); color:#fff;
+  border:0; font-size:30px; line-height:1; cursor:pointer; z-index:30;
+  box-shadow:0 5px 16px rgba(0,0,0,.28);
+}
+.fab:active{transform:translateY(1px)}
 
 /* ---------- season summary ---------- */
 .season{
@@ -89,12 +122,15 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
   position:relative; touch-action:pan-y;
 }
 .row{border-left-width:5px; border-left-style:solid}
-.row.flash{box-shadow:0 0 0 2px var(--rowink) inset}
+.row.here{
+  background:color-mix(in srgb, var(--rowink) 10%, var(--card));
+  box-shadow:0 0 0 2px var(--rowink) inset;
+}
 .yearbar{display:flex; align-items:center; gap:10px; margin-bottom:2px}
 .yearbar .dot{width:12px; height:12px; border-radius:50%; flex:0 0 auto}
 .season .yr{line-height:1}
 .filter.yearsel{border-left:5px solid var(--yearink)}
-.rowcalls{display:inline-flex; gap:6px; vertical-align:middle; margin-left:2px}
+.rowcalls{display:inline-flex; gap:6px; vertical-align:middle; margin-right:8px}
 .rowcalls a{
   display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px;
   border-radius:50%; border:1px solid var(--line); background:var(--paper); color:var(--muted);
@@ -298,7 +334,7 @@ const esc = t => String(t ?? '').replace(/[&<>"']/g, c =>
 const TBL = {                  // short name in the app -> table in Supabase
   cities:'cc_cities', store_types:'cc_store_types', people:'cc_people',
   locations:'cc_locations', shops:'cc_shops', shop_people:'cc_shop_people',
-  members:'cc_members', photos:'cc_photos',
+  members:'cc_members', photos:'cc_photos', activity:'cc_activity',
 };
 let D = {};                    // every table, held in memory
 let myRole = null;             // admin, editor or viewer
@@ -504,11 +540,13 @@ async function loadAll(){
   myRole = mine.data ? mine.data.role : null;
   if (!myRole) return;
 
-  const names = ['cities','store_types','people','locations','shops','shop_people','photos'];
+  const names = ['cities','store_types','people','locations','shops','shop_people','photos','activity'];
   if (myRole === 'admin') names.push('members');
   const res = await Promise.all(names.map(n =>
-    db.from(TBL[n]).select('*')
-      .order(['shop_people','photos'].includes(n) ? 'id' : n === 'members' ? 'email' : 'name')));
+    n === 'activity'
+      ? db.from(TBL[n]).select('*').order('at', {ascending:false}).limit(400)
+      : db.from(TBL[n]).select('*')
+          .order(['shop_people','photos'].includes(n) ? 'id' : n === 'members' ? 'email' : 'name')));
   names.forEach((n, i) => {
     if (res[i].error) throw res[i].error;
     D[n] = res[i].data;
@@ -523,27 +561,79 @@ function render(){
     <header class="top">
       <div class="topin">
         <div class="brand">Calendar <em>Club</em></div>
-        <div class="who">${esc(session?.user?.email || '')}<button id="out">Sign out</button></div>
+        <button class="menubtn" id="menubtn" aria-label="Menu" aria-expanded="false">
+          <i></i><i></i><i></i></button>
+        <div class="menu" id="menu">
+          ${Object.entries(TABLES).filter(([,v]) => !v.adminOnly || myRole === 'admin').map(([k,v]) =>
+            `<button aria-selected="${k===tab}" data-tab="${k}">${v.label}</button>`).join('')}
+          ${canEdit('shops') ? `<button aria-selected="${tab==='import'}"
+            data-tab="import">Import</button>` : ''}
+          <button aria-selected="${tab==='activity'}" data-tab="activity">Activity</button>
+          <button aria-selected="${tab==='wishes'}" data-tab="wishes">Wishlist</button>
+          <button aria-selected="${tab==='help'}" data-tab="help">Help</button>
+          <hr>
+          <div class="who2">${esc(session?.user?.email || '')}</div>
+          <button id="out">Sign out</button>
+        </div>
       </div>
-      <nav role="tablist">
-        ${Object.entries(TABLES).filter(([,v]) => !v.adminOnly || myRole === 'admin').map(([k,v]) =>
-          `<button role="tab" aria-selected="${k===tab}" data-tab="${k}">${v.label}</button>`).join('')}
-        ${canEdit('shops') ? `<button role="tab" aria-selected="${tab==='import'}"
-          data-tab="import">Import</button>` : ''}
-        <button role="tab" aria-selected="${tab==='help'}" data-tab="help">Help</button>
-      </nav>
+      ${tab === 'shops' ? yearHead() : ''}
     </header>
     <main class="wrap">${
       tab === 'help' ? helpScreen() :
+      tab === 'activity' ? activityScreen() :
+      tab === 'wishes' ? wishScreen() :
       tab === 'import' ? importScreen() :
-      tab === 'shops' ? shopsScreen() : listScreen(tab)}</main>`;
+      tab === 'shops' ? shopsScreen() : listScreen(tab)}</main>
+    ${TABLES[tab] && canEdit(tab) ? `<button class="fab" id="new"
+      aria-label="Add ${esc(TABLES[tab].single.toLowerCase())}"
+      title="Add ${esc(TABLES[tab].single.toLowerCase())}">+</button>` : ''}`;
 
   document.getElementById('out').onclick = async () => { await db.auth.signOut(); location.reload(); };
-  app.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-    tab = b.dataset.tab; filters = {q:'', year:filters.year, status:''}; render();
+  const mb = document.getElementById('menubtn'), mn = document.getElementById('menu');
+  mb.onclick = e => {
+    e.stopPropagation();
+    const on = mn.classList.toggle('on');
+    mb.setAttribute('aria-expanded', on);
+  };
+  document.addEventListener('click', e => {
+    if (!mn.contains(e.target) && e.target !== mb){
+      mn.classList.remove('on'); mb.setAttribute('aria-expanded', false);
+    }
   });
-  if (tab === 'import') wireImport(); else wireList();
+  mn.querySelectorAll('button[data-tab]').forEach(b => b.onclick = () => {
+    tab = b.dataset.tab;
+    filters = {...filters, q:'', status:''};
+    render();
+  });
+  const fab = document.getElementById('new');
+  if (fab) fab.onclick = () => {
+    copyFrom = null; openRec = {table:tab, id:null}; editing = true; drawSheet();
+  };
+  const head = document.getElementById('yearhead');
+  if (head) wireSwipe(head);
+  if (tab === 'import') wireImport();
+  else if (tab === 'activity') wireActivity();
+  else if (tab === 'wishes') wireWishes();
+  else wireList();
   if (openRec) drawSheet();
+}
+
+function yearHead(){
+  const shown = D.shops.filter(s =>
+    (!filters.year || s.operating_year === filters.year) &&
+    (!filters.tm || s.tm_id === Number(filters.tm)) &&
+    (!filters.status || s.store_status === filters.status));
+  const ink = filters.year ? seasonInk(filters.year) : 'var(--ink)';
+  return `<div class="yearhead" id="yearhead">
+    <div class="yearrow">
+      ${filters.year ? `<span class="dot" style="background:${ink}"></span>` : ''}
+      <span class="yr" style="color:${ink}">${esc(filters.year || 'All years')}</span>
+      <span class="cnt"><b>${shown.length}</b>${shown.length === 1 ? 'store' : 'stores'}</span>
+    </div>
+    <input class="search" id="q" placeholder="Search store, city, mall or person"
+      value="${esc(filters.q)}">
+    ${filters.year ? '<p class="yearhint">Swipe here or on a card to change season</p>' : ''}
+  </div>`;
 }
 
 function shopsScreen(){
@@ -569,12 +659,6 @@ function shopsScreen(){
       <div class="stat"><b class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '+' : '−'}${money(Math.abs(diff))}</b><span>difference</span></div>
     </div>
     <div class="controls">
-      <input class="search" id="q" placeholder="Search store, city, mall or person" value="${esc(filters.q)}">
-      <select class="filter yearsel" id="year" style="--yearink:${
-        filters.year ? seasonInk(filters.year) : 'var(--line)'}">
-        <option value="">All years</option>
-        ${years.map(y => `<option ${y===filters.year?'selected':''}>${esc(y)}</option>`).join('')}
-      </select>
       <select class="filter" id="status">
         <option value="">Any status</option>
         ${['Reserve','Pending','Active','Open and Trading']
@@ -587,12 +671,15 @@ function shopsScreen(){
       <label class="rolechk" title="Open on this sort next time">
         <input type="checkbox" id="sortdef" ${recallSort() === filters.sort ? 'checked' : ''}> Default
       </label>
+      <select class="filter" id="allyears">
+        <option value="">This season only</option>
+        <option value="all" ${!filters.year ? 'selected' : ''}>Every season at once</option>
+      </select>
       ${tms.length ? `<select class="filter" id="tm">
         <option value="">All areas</option>
         ${tms.map(p => `<option value="${p.id}" ${String(p.id)===String(filters.tm)?'selected':''}>${
           esc(personLabel(p))}</option>`).join('')}
       </select>` : ''}
-      ${canEdit('shops') ? '<button class="btn primary" id="new">Add store</button>' : ''}
     </div>
     <div id="list"></div>`;
 }
@@ -738,6 +825,7 @@ async function addPhotos(subject, id, files){
       say('Could not add ' + file.name + ': ' + e.message);
     }
   }
+  if (done) logIt(done === 1 ? 'added a photo to' : `added ${done} photos to`, subject, id, null);
   drawSheet();
   const st = document.getElementById('photostatus');
   if (st) st.textContent = failed ? `${done} added, ${failed} failed` : '';
@@ -775,6 +863,7 @@ async function removePhoto(photoId){
   const {error} = await db.from('cc_photos').delete().eq('id', photoId);
   if (error){ toast('Could not remove it'); return; }
   await db.storage.from('cc-photos').remove([ph.path]);
+  logIt('removed a photo from', ph.subject, ph.subject_id, null);
   D.photos = D.photos.filter(p => p.id !== photoId);
   delete photoURL[ph.path];
   drawSheet();
@@ -784,7 +873,7 @@ async function removePhoto(photoId){
    Swipe a store card sideways to see the same store in the next or previous
    season. The sort and filters stay put, and the store you swiped is brought
    back into view and briefly outlined. */
-let swipeWired = null;
+const swipeWired = new WeakSet();
 
 // Each season gets its own hue, so it's obvious at a glance which one you're in.
 const SEASON_HUES = [4, 205, 150, 275, 32, 320, 185, 95];
@@ -799,6 +888,9 @@ function seasonList(){
   return [...new Set(D.shops.map(s => s.operating_year).filter(Boolean))].sort();
 }
 
+let lastSeason = '';
+let hereStore = '';        // the store you swiped from, kept lit as you move seasons
+
 function hopSeason(dir, storeName){
   const years = seasonList();
   const here = years.indexOf(filters.year);
@@ -808,15 +900,17 @@ function hopSeason(dir, storeName){
     toast(dir > 0 ? 'No later season yet' : 'No earlier season');
     return;
   }
-  filters.year = next;
+  filters.year = next; lastSeason = next;
   render();
   const rows = [...document.querySelectorAll('#list .row')];
-  const match = rows.find(r => r.dataset.name === storeName);
+  const match = storeName ? rows.find(r => r.dataset.name === storeName) : null;
+  if (!storeName){ toast(next); return; }
   if (match){
     if (typeof match.scrollIntoView === 'function')
       match.scrollIntoView({block:'center', behavior:'smooth'});
-    match.classList.add('flash');
-    setTimeout(() => match.classList.remove('flash'), 2600);
+    document.querySelectorAll('.row.here').forEach(r => r.classList.remove('here'));
+    match.classList.add('here');
+    hereStore = storeName;
     toast(next);
   } else {
     toast(`${storeName} isn't in ${next}`);
@@ -824,19 +918,21 @@ function hopSeason(dir, storeName){
 }
 
 function wireSwipe(box){
-  if (swipeWired === box) return;
-  swipeWired = box;
+  if (swipeWired.has(box)) return;
+  swipeWired.add(box);
   let x0 = 0, y0 = 0, name = null;
 
   box.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1){ name = null; return; }
     const row = e.target.closest('.row');
-    if (!row || e.touches.length !== 1){ name = null; return; }
+    if (!row && !box.classList.contains('yearhead')){ name = null; return; }
+    if (e.target.closest('input, select, textarea, a')){ name = null; return; }
     x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-    name = row.dataset.name;
+    name = row ? row.dataset.name : '';        // '' means "no particular store"
   }, {passive:true});
 
   box.addEventListener('touchend', e => {
-    if (!name) return;
+    if (name === null) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - x0, dy = t.clientY - y0;
     const who = name; name = null;
@@ -845,6 +941,209 @@ function wireSwipe(box){
     // Dragging right to left steps back a season; left to right goes forward.
     hopSeason(dx < 0 ? -1 : 1, who);
   }, {passive:true});
+}
+
+/* --------------------------------------------------------------- activity
+   Who changed what, and who rang whom. Written as it happens, never edited. */
+
+function logIt(action, subject, subjectId, detail){
+  const row = {who: session.user.email, action, subject,
+               subject_id: subjectId || null, detail: detail || null};
+  // Optimistic: show it straight away, and don't let a logging hiccup
+  // interrupt whatever the person was actually doing.
+  // Promise.resolve first: the query builder is a thenable, not a full promise.
+  Promise.resolve(db.from('cc_activity').insert(row).select().single())
+    .then(r => { if (r && !r.error && r.data) D.activity.unshift(r.data); })
+    .catch(() => {});
+}
+
+const ACT_LABEL = {shops:'store', people:'person', locations:'mall',
+                   store_types:'store type', cities:'city', members:'access'};
+
+function subjectName(a){
+  if (!a.subject || !a.subject_id) return a.detail || '';
+  const t = a.subject;
+  const rec = (D[t] || []).find(r => r.id === a.subject_id);
+  return rec ? titleOf(t, rec) : (a.detail || 'a deleted record');
+}
+
+function whenText(iso){
+  if (!iso) return '';
+  const d = new Date(iso), now = new Date();
+  const mins = Math.round((now - d) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + (mins === 1 ? ' minute ago' : ' minutes ago');
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+  return d.toLocaleDateString('en-GB', {day:'numeric', month:'short'}) + ' at ' +
+         d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+}
+
+function activityLine(a){
+  const who = (a.who || '').split('@')[0];
+  const what = ACT_LABEL[a.subject] || a.subject || '';
+  const name = subjectName(a);
+  const extra = a.detail && a.detail !== name ? ` — ${a.detail}` : '';
+  return `<div class="plink" style="display:block"${
+    a.subject && a.subject_id && D[a.subject] ? ` data-goto="${a.subject}:${a.subject_id}"` : ''}>
+    <div><b>${esc(who)}</b> ${esc(a.action)}${what ? ' ' + esc(what) : ''}${
+      name ? ' <b>' + esc(name) + '</b>' : ''}${esc(extra)}</div>
+    <div class="rmeta">${esc(whenText(a.at))}</div>
+  </div>`;
+}
+
+function activityScreen(){
+  const list = (D.activity || []);
+  const q = filters.q.trim().toLowerCase();
+  const shown = list.filter(a => !q ||
+    [a.who, a.action, a.detail, subjectName(a)].join(' ').toLowerCase().includes(q));
+  return `
+    <h2 class="detail" style="margin-top:22px">Activity</h2>
+    <div class="sub">Everything added, changed, removed or rung, newest first.</div>
+    <div class="controls">
+      <input class="search" id="q" placeholder="Search activity" value="${esc(filters.q)}">
+    </div>
+    ${!shown.length ? '<div class="empty-state">Nothing logged yet.</div>' :
+      `<p class="count">${shown.length} ${shown.length === 1 ? 'entry' : 'entries'}</p>
+       <section class="grp"><div class="people-list">
+         ${shown.slice(0, 300).map(activityLine).join('')}
+       </div></section>`}`;
+}
+
+// The handful of entries that belong to the record you're looking at.
+function activityBlock(t, id){
+  const mine = (D.activity || [])
+    .filter(a => a.subject === t && a.subject_id === id)
+    .slice(0, 6);
+  if (!mine.length) return '';
+  return `<section class="grp"><h3>Recent activity</h3>
+    <div class="people-list">${mine.map(a => `<div class="plink" style="display:block">
+      <div>${esc((a.who || '').split('@')[0])} ${esc(a.action)}${
+        a.detail ? ' — ' + esc(a.detail) : ''}</div>
+      <div class="rmeta">${esc(whenText(a.at))}</div></div>`).join('')}</div></section>`;
+}
+
+/* ------------------------------------------------------------- the wishlist
+   The same list the contacts app shows: one shared table, two doors into it. */
+let WISHES = [], WISH_APP = 'calendar club', WISH_WHO = {}, wishError = '';
+
+const WISH_STATUS = [['idea','Idea'], ['maybe','Maybe'], ['doing','Doing'],
+                     ['done','Done'], ['no','Not doing']];
+
+async function loadWishes(){
+  wishError = '';
+  const w = await db.from('wishes').select('*').order('created_at', {ascending:false});
+  if (w.error){ wishError = w.error.message; WISHES = []; return; }
+  WISHES = w.data || [];
+  try {
+    const pr = await db.from('profiles').select('*');
+    (pr.data || []).forEach(p => {
+      WISH_WHO[p.id] = p.display_name || String(p.email || '').split('@')[0] || 'someone';
+    });
+  } catch (e){ /* names are a nicety, not a requirement */ }
+}
+
+const wishWho = id => id === session.user.id ? 'you' : (WISH_WHO[id] || 'someone');
+
+function wishScreen(){
+  return `
+    <h2 class="detail" style="margin-top:22px">Wishlist</h2>
+    <div class="sub">Ideas for these apps. Anyone signed in can add one, and it's the
+      same list the contacts app shows.</div>
+    <div id="wishbody"><div class="empty-state">Loading…</div></div>`;
+}
+
+function drawWishes(){
+  const box = document.getElementById('wishbody');
+  if (!box) return;
+  if (wishError){
+    box.innerHTML = `<section class="grp"><h3>Can't reach the wishlist</h3>
+      <p>${esc(wishError)}</p>
+      <p class="rmeta">The list lives in the contacts app's tables. If this keeps
+      happening the permissions on it may need opening up to Calendar Club users.</p>
+    </section>`;
+    return;
+  }
+  const live = WISHES.filter(w => w.app === WISH_APP || w.app === 'either');
+  const byStatus = {};
+  live.forEach(w => (byStatus[w.status] = byStatus[w.status] || []).push(w));
+
+  box.innerHTML = `
+    <div class="controls">
+      <button class="btn ${WISH_APP === 'calendar club' ? 'primary' : ''}"
+        data-wapp="calendar club">Calendar Club</button>
+      <button class="btn ${WISH_APP === 'contacts' ? 'primary' : ''}"
+        data-wapp="contacts">Contacts</button>
+    </div>
+
+    <section class="grp"><h3>Add an idea</h3>
+      <div class="f wide"><label>What would be good?</label>
+        <input id="wTitle" placeholder="In a few words"></div>
+      <div class="f wide" style="margin-top:10px"><label>Anything worth explaining</label>
+        <textarea id="wNotes" rows="2"></textarea></div>
+      <button class="btn primary" id="wAdd" style="margin-top:12px">Add it</button>
+    </section>
+
+    ${WISH_STATUS.map(([key, label]) => {
+      const rows = byStatus[key] || [];
+      if (!rows.length) return '';
+      return `<section class="grp"><h3>${label} · ${rows.length}</h3>
+        <div class="people-list">${rows.map(w => `
+          <div class="plink" style="display:block">
+            <div style="font-weight:600;${key === 'done' || key === 'no'
+              ? 'color:var(--muted);text-decoration:line-through' : ''}">${esc(w.title)}</div>
+            ${w.notes ? `<div class="rmeta">${esc(w.notes)}</div>` : ''}
+            <div class="rmeta">from ${esc(wishWho(w.created_by))} · ${esc(
+              new Date(w.created_at).toLocaleDateString('en-GB', {day:'numeric', month:'short'}))}</div>
+            <div class="addp" style="margin-top:8px">
+              ${WISH_STATUS.map(([k, l]) => `<button type="button" class="btn ${
+                w.status === k ? 'primary' : ''}" style="padding:5px 11px;font-size:13.5px"
+                data-wset="${w.id}:${k}">${l}</button>`).join('')}
+              ${w.created_by === session.user.id
+                ? `<button type="button" class="btn" style="padding:5px 11px;font-size:13.5px;
+                   color:var(--accent)" data-wdel="${w.id}">Remove</button>` : ''}
+            </div>
+          </div>`).join('')}</div></section>`;
+    }).join('')}
+
+    ${!live.length ? `<div class="empty-state">No ideas yet for ${esc(WISH_APP === 'contacts'
+      ? 'the contacts app' : 'Calendar Club')}.</div>` : ''}`;
+
+  box.querySelectorAll('[data-wapp]').forEach(b => b.onclick = () => {
+    WISH_APP = b.dataset.wapp; drawWishes();
+  });
+
+  const add = document.getElementById('wAdd');
+  if (add) add.onclick = async () => {
+    const title = document.getElementById('wTitle').value.trim();
+    if (!title){ toast('Say what the idea is'); return; }
+    add.disabled = true;
+    const {error} = await db.from('wishes').insert({
+      created_by: session.user.id, app: WISH_APP, title,
+      notes: document.getElementById('wNotes').value.trim() || null});
+    if (error){ toast('Could not add it'); add.disabled = false; return; }
+    logIt('added a wishlist idea', null, null, title);
+    await loadWishes(); drawWishes(); toast('Added');
+  };
+
+  box.querySelectorAll('[data-wset]').forEach(b => b.onclick = async () => {
+    const [id, st] = b.dataset.wset.split(':');
+    const {error} = await db.from('wishes').update({status: st}).eq('id', Number(id));
+    if (error){ toast('Could not change that'); return; }
+    await loadWishes(); drawWishes();
+  });
+
+  box.querySelectorAll('[data-wdel]').forEach(b => b.onclick = async () => {
+    if (!confirm('Remove your idea?')) return;
+    const {error} = await db.from('wishes').delete().eq('id', Number(b.dataset.wdel));
+    if (error){ toast('Could not remove it'); return; }
+    await loadWishes(); drawWishes();
+  });
+}
+
+async function wireWishes(){
+  await loadWishes();
+  drawWishes();
 }
 
 function helpScreen(){
@@ -856,8 +1155,13 @@ function helpScreen(){
       myRole ? ' · ' + esc(myRole) : ''}.</div>
 
     ${q('Finding a store', `
-      <p>The <b>Stores</b> tab opens on the current season. The three dropdowns narrow
-      the list by year, status and area, and they work together.</p>
+      <p>The sections live behind the <b>three-line menu</b> at the top right: Stores,
+      People, Malls, Types, Cities, Help and, if you can edit, Import.</p>
+      <p><b>Stores</b> opens on the current season, with the season and the store count
+      pinned at the top along with the search box, so they stay put as you scroll. The
+      dropdowns underneath narrow by status, area and sort order, and they work
+      together. <b>Every season at once</b> lifts the season filter when you want to
+      see everything.</p>
       <p>The search box matches store names, cities, malls, store types and the people
       attached — so typing a builder's name finds every store they worked on. Several
       words all have to match, so <i>helen derby</i> finds Derby stores Helen was on.</p>
@@ -866,14 +1170,15 @@ function helpScreen(){
       <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
       date is the default. Tick <b>Default</b> beside it to open on a different order
       next time.</p>
-      <p>On a phone, <b>swipe a store card sideways</b> to see the same store in another
-      season. Dragging right to left steps back a year, left to right goes forward. The
+      <p>On a phone, <b>swipe sideways</b> — on a store card or on the pinned season at
+      the top — to move between seasons. Dragging right to left steps back a year, left to right goes forward. The
       sort and filters stay as they are, and the store you swiped is scrolled to and
       outlined for a couple of seconds. It needs a season chosen rather than "All
       years".</p>
       <p>Every season has its own colour. It runs down the left edge of each card, and
-      the season number at the top of the screen is in the same colour, so you can tell
-      at a glance which year you're looking at.</p>
+      the season pinned at the top is in the same colour, so you can tell at a glance
+      which year you're looking at. The card you last swiped from keeps a light wash in
+      that colour as you move between seasons, so you don't lose your place.</p>
       <p>Where a store has an operator with a number on file, the card carries a phone
       button and a WhatsApp button. Both work straight from the list, without opening
       the store.</p>`)}
@@ -907,7 +1212,8 @@ function helpScreen(){
     ${!can ? q('What you can change', `
       <p>Your access is view only. You can see and search everything, but not change
       it. If you need to correct something, ask Barry.</p>`) : q('Adding a store', `
-      <p><b>Add store</b> at the top of the Stores tab. Choose the city first, then the
+      <p>The round <b>+</b> button at the bottom right adds a record to whichever
+      section you're in. On Stores: choose the city first, then the
       store from the list of previous ones — that fills in the name, mall, store type
       and TM, and brings across the builders and staff who were on it.</p>
       <p>The operator is deliberately left blank each season. Set it from the Operator
@@ -959,6 +1265,23 @@ function helpScreen(){
       <p>Stores with no build or opening date are skipped, because there's no way to
       tell which season they belong to. Store types and operators the report mentions
       that aren't here yet are created for you.</p>`)}
+
+    ${q('Activity', `
+      <p>The <b>Activity</b> section keeps a running record: what was added, changed,
+      removed, which photos went on and off, every import, and every phone call,
+      WhatsApp message and email started from inside the app. Each entry says who and
+      when, and tapping one opens the record it refers to.</p>
+      <p>Each store, person and mall also shows its own recent activity at the bottom of
+      its page.</p>
+      <p>Entries can't be edited or deleted by anyone, including admins. That's the
+      point of a log.</p>`)}
+
+    ${q('Wishlist', `
+      <p><b>Wishlist</b> is where anyone can put ideas for either app. It's the same
+      list the contacts app shows, so an idea added here appears there too. Use the two
+      buttons at the top to switch between Calendar Club ideas and contacts ones.</p>
+      <p>Anyone signed in can add an idea and move any idea between Idea, Maybe, Doing,
+      Done and Not doing. You can only remove your own.</p>`)}
 
     ${q('If something goes wrong', `
       <p>Signed in but seeing nothing? Your email hasn't been added to the access list
@@ -1177,6 +1500,16 @@ function importScreen(){
 
     <div id="impopts"></div>
     <div id="impplan"></div>`;
+}
+
+function wireActivity(){
+  const q = document.getElementById('q');
+  if (q) q.oninput = () => { filters.q = q.value; render();
+    const box = document.getElementById('q'); if (box){ box.focus(); box.selectionStart = box.value.length; } };
+  app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
+    const [gt, gid] = b.dataset.goto.split(':');
+    tab = gt; openRec = {table:gt, id:Number(gid)}; editing = false; render();
+  });
 }
 
 function wireImport(){
@@ -1412,6 +1745,8 @@ async function applyPlan(){
 
   D.shops.sort((a,b) => (b.operating_year || '').localeCompare(a.operating_year || '')
     || (a.name || '').localeCompare(b.name || ''));
+  logIt('imported from the Store Opening Report', 'shops', null,
+        `${p.creates.length} added, ${p.updates.length} updated, sheet ${p.sheet}`);
   impBusy = false;
 
   document.getElementById('impplan').innerHTML = `
@@ -1433,7 +1768,6 @@ function listScreen(t){
   return `
     <div class="controls" style="margin-top:20px">
       <input class="search" id="q" placeholder="Search ${TABLES[t].label.toLowerCase()}" value="${esc(filters.q)}">
-      ${canEdit(t) ? `<button class="btn primary" id="new">Add ${TABLES[t].single.toLowerCase()}</button>` : ''}
     </div>
     <div id="list"></div>`;
 }
@@ -1441,8 +1775,11 @@ function listScreen(t){
 function wireList(){
   const q = document.getElementById('q');
   if (q) q.oninput = () => { filters.q = q.value; drawList(); };
-  const y = document.getElementById('year');
-  if (y) y.onchange = () => { filters.year = y.value; render(); };
+  const ay = document.getElementById('allyears');
+  if (ay) ay.onchange = () => {
+    filters.year = ay.value === 'all' ? '' : (lastSeason || currentYear());
+    render();
+  };
   const st = document.getElementById('status');
   if (st) st.onchange = () => { filters.status = st.value; drawList(); };
   const so = document.getElementById('sort');
@@ -1496,7 +1833,19 @@ function drawList(){
     r.onclick = open;
     r.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(e); } };
   });
-  if (tab === 'shops') wireSwipe(box);
+  if (tab === 'shops'){
+    wireSwipe(box);
+    if (hereStore){
+      const lit = [...box.querySelectorAll('.row')].find(r => r.dataset.name === hereStore);
+      if (lit) lit.classList.add('here');
+    }
+    box.querySelectorAll('.row a[href^="tel:"], .row a[href^="https://wa.me/"]')
+      .forEach(a => a.addEventListener('click', () => {
+        const row = a.closest('.row');
+        logIt(a.href.startsWith('tel:') ? 'phoned' : 'messaged on WhatsApp',
+              'shops', Number(row.dataset.id), row.dataset.name);
+      }));
+  }
   fillPhotos();
 }
 
@@ -1549,9 +1898,9 @@ function shopRow(s){
     <div class="row" data-id="${s.id}" data-name="${esc(s.name)}" role="button" tabindex="0"
       style="border-left-color:${seasonInk(s.operating_year)}; --rowink:${seasonInk(s.operating_year)}">
       <h3>${esc(s.name)}</h3>
-      <div class="rmeta">${esc([ops.length ? ops.join(' & ') : 'No operator',
-        nameOf('store_types', s.type_id), s.operating_year].filter(Boolean).join(' · '))}
-        ${opPerson ? callButtons(opPerson) : ''}</div>
+      <div class="rmeta">${opPerson ? callButtons(opPerson) : ''}${esc(
+        [ops.length ? ops.join(' & ') : 'No operator',
+         nameOf('store_types', s.type_id)].filter(Boolean).join(' · '))}</div>
       <div class="rfoot">
         <span class="tag ${cls}">${esc(s.store_status || PHASE_LABEL[phase])}</span>
         ${foot}
@@ -1661,6 +2010,7 @@ function drawSheet(){
           return html;
         }).join('')}
         ${openRec.id && ['shops','people','locations'].includes(t) ? photosBlock(t, rec) : ''}
+        ${openRec.id ? activityBlock(t, openRec.id) : ''}
         ${t === 'shops' && openRec.id ? peopleBlock(rec) : ''}
         ${t === 'people' && openRec.id ? storesBlock(rec) : ''}
       </form>
@@ -1704,6 +2054,14 @@ function drawSheet(){
     const pid = Number(el.querySelector('#opsel').value);
     if (pid) link(rec.id, pid, 'Operator');
   };
+  el.querySelectorAll('a[href^="tel:"], a[href^="mailto:"], a[href^="https://wa.me/"]')
+    .forEach(a => a.addEventListener('click', () => {
+      const how = a.href.startsWith('tel:') ? 'phoned'
+                : a.href.startsWith('mailto:') ? 'emailed' : 'messaged on WhatsApp';
+      const who = (a.closest('.opcard') || {}).querySelector
+        ? (a.closest('.opcard').querySelector('.nm') || {}).textContent : '';
+      logIt(how, t, openRec.id, (who || '').trim() || null);
+    }));
   el.querySelectorAll('[data-profile]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     makeProfile(Number(b.dataset.profile));
@@ -2110,10 +2468,14 @@ async function save(t, rec){
       const {data, error} = await db.from(TBL[t]).update(patch).eq('id', openRec.id).select().single();
       if (error) throw error;
       Object.assign(D[t].find(r => r.id === openRec.id), data);
+      const fields = Object.keys(patch).filter(k => k !== 'imported')
+        .map(k => FIELD_LABEL[k] || k).join(', ');
+      logIt('changed', t, openRec.id, fields || null);
     } else {
       const {data, error} = await db.from(TBL[t]).insert(patch).select().single();
       if (error) throw error;
       D[t].push(data); openRec.id = data.id;
+      logIt('added', t, data.id, null);
       if (t === 'shops'){
         const rows = copyFrom
           ? (D.shop_people || []).filter(l => l.shop_id === copyFrom && l.role !== 'Operator')
@@ -2140,6 +2502,7 @@ async function remove(t, rec){
   if (!confirm(`Delete ${titleOf(t, rec)}? This cannot be undone.`)) return;
   const {error} = await db.from(TBL[t]).delete().eq('id', rec.id);
   if (error){ document.getElementById('err').textContent = 'Could not delete: ' + error.message; return; }
+  logIt('deleted', t, null, titleOf(t, rec));
   D[t] = D[t].filter(r => r.id !== rec.id);
   if (t === 'shops') D.shop_people = D.shop_people.filter(l => l.shop_id !== rec.id);
   if (t === 'people') D.shop_people = D.shop_people.filter(l => l.person_id !== rec.id);
@@ -2157,12 +2520,17 @@ async function link(shopId, personId, roleName){
       error.code === '23505' ? 'That person is already on this store with that role.' : error.message;
     return;
   }
-  D.shop_people.push(data); drawSheet(); drawList();
+  D.shop_people.push(data);
+  logIt('added ' + role.toLowerCase(), 'shops', shopId, nameOf('people', pid));
+  drawSheet(); drawList();
 }
 
 async function unlink(linkId){
   const {error} = await db.from(TBL.shop_people).delete().eq('id', linkId);
   if (error){ toast('Could not remove'); return; }
+  const gone = D.shop_people.find(l => l.id === linkId);
+  if (gone) logIt('removed ' + String(gone.role).toLowerCase(), 'shops', gone.shop_id,
+                  nameOf('people', gone.person_id));
   D.shop_people = D.shop_people.filter(l => l.id !== linkId);
   drawSheet(); drawList();
 }
