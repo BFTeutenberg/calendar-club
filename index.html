@@ -90,9 +90,13 @@ header.top{
 
 /* ---------- season summary ---------- */
 .season{
-  display:flex; flex-wrap:wrap; gap:22px; align-items:flex-end;
-  padding:22px 0 18px; border-bottom:1px solid var(--line); margin-bottom:16px;
+  display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;
+  padding:18px 0 16px; border-bottom:1px solid var(--line); margin-bottom:16px;
 }
+.season .stat.start{text-align:left}
+.season .stat.mid{text-align:center}
+.season .stat.end{text-align:right}
+.season .stat b{font-size:clamp(15px, 4.6vw, 21px)}
 .season .yr{font-size:34px; font-weight:700; letter-spacing:-0.03em; line-height:1}
 .stat{display:flex; flex-direction:column; gap:2px}
 .stat b{font-size:19px; font-weight:600}
@@ -101,6 +105,9 @@ header.top{
 
 /* ---------- controls ---------- */
 .controls{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px}
+.controls.pair{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px}
+.controls.solo{display:block}
+.controls.pair select, .controls.solo select{width:100%; min-width:0}
 .search{
   flex:1 1 220px; min-width:0; padding:10px 12px; border:1px solid var(--line);
   border-radius:var(--radius); background:var(--card);
@@ -355,12 +362,7 @@ function sortShops(list){
   return list.sort((a,b) => byBuild(a,b) || byName(a,b));
 }
 
-function rememberSort(v){
-  try { v ? localStorage.setItem('cc_sort', v) : localStorage.removeItem('cc_sort'); } catch (e) {}
-}
-function recallSort(){
-  try { return localStorage.getItem('cc_sort') || ''; } catch (e) { return ''; }
-}
+
 
 function rememberTM(v){
   try { localStorage.setItem('cc_tm_filter', v || ''); } catch (e) {}
@@ -648,39 +650,29 @@ function shopsScreen(){
 
   return `
     <div class="season">
-      <div><div class="yearbar">
-        ${filters.year ? `<span class="dot" style="background:${seasonInk(filters.year)}"></span>` : ''}
-        <div class="yr" style="color:${filters.year ? seasonInk(filters.year) : 'inherit'}">${
-          esc(filters.year || 'All years')}</div>
-      </div></div>
-      <div class="stat"><b>${inYear.length}</b><span>stores</span></div>
-      <div class="stat"><b>${money(bud)}</b><span>budget</span></div>
-      <div class="stat"><b>${money(act)}</b><span>actual</span></div>
-      <div class="stat"><b class="${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? '+' : '−'}${money(Math.abs(diff))}</b><span>difference</span></div>
+      <div class="stat start"><b>${money(bud)}</b><span>budget</span></div>
+      <div class="stat mid"><b class="${diff >= 0 ? 'up' : 'down'}">${
+        diff >= 0 ? '+' : '−'}${money(Math.abs(diff))}</b><span>difference</span></div>
+      <div class="stat end"><b>${money(act)}</b><span>actual</span></div>
     </div>
-    <div class="controls">
+    <div class="controls pair">
+      <select class="filter" id="sort">
+        ${Object.entries(SORTS).map(([k,v]) =>
+          `<option value="${k}" ${k===filters.sort?'selected':''}>Sort: ${v}</option>`).join('')}
+      </select>
       <select class="filter" id="status">
         <option value="">Any status</option>
         ${['Reserve','Pending','Active','Open and Trading']
           .map(s => `<option ${s===filters.status?'selected':''}>${s}</option>`).join('')}
       </select>
-      <select class="filter" id="sort">
-        ${Object.entries(SORTS).map(([k,v]) =>
-          `<option value="${k}" ${k===filters.sort?'selected':''}>Sort: ${v}</option>`).join('')}
-      </select>
-      <label class="rolechk" title="Open on this sort next time">
-        <input type="checkbox" id="sortdef" ${recallSort() === filters.sort ? 'checked' : ''}> Default
-      </label>
-      <select class="filter" id="allyears">
-        <option value="">This season only</option>
-        <option value="all" ${!filters.year ? 'selected' : ''}>Every season at once</option>
-      </select>
-      ${tms.length ? `<select class="filter" id="tm">
+    </div>
+    ${tms.length ? `<div class="controls solo">
+      <select class="filter" id="tm">
         <option value="">All areas</option>
         ${tms.map(p => `<option value="${p.id}" ${String(p.id)===String(filters.tm)?'selected':''}>${
           esc(personLabel(p))}</option>`).join('')}
-      </select>` : ''}
-    </div>
+      </select>
+    </div>` : ''}
     <div id="list"></div>`;
 }
 
@@ -889,9 +881,58 @@ function seasonList(){
 }
 
 let lastSeason = '';
-let hereStore = '';        // the store you swiped from, kept lit as you move seasons
+let hereStore = null;      // the store you landed on, kept lit as you move seasons
 
-function hopSeason(dir, storeName){
+// Store names drift between seasons — "Bury Mill Gate" becomes "Bury Millgate" —
+// so match on the store number where there is one, and otherwise on how alike the
+// names are once the city and the filler words are taken out.
+const NAME_FILLER = new Set(['the','shopping','centre','center','mall','arcade','store',
+  'unit','kiosk','precinct','retail','park','sc','ltd','uk','fixed','temp','temporary','shop']);
+
+const nameWords = n => String(n == null ? '' : n).toLowerCase()
+  .replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
+
+function coreWords(shop){
+  const city = new Set(nameWords(nameOf('cities', shop.city_id)));
+  const core = nameWords(shop.name).filter(w => !NAME_FILLER.has(w) && !city.has(w));
+  return core.length ? core : nameWords(shop.name).filter(w => !NAME_FILLER.has(w));
+}
+
+function setDice(a, b){
+  if (!a.size || !b.size) return 0;
+  let hit = 0; a.forEach(x => { if (b.has(x)) hit++; });
+  return (2 * hit) / (a.size + b.size);
+}
+function pairsOf(str){
+  const g = new Set();
+  for (let i = 0; i < str.length - 1; i++) g.add(str.slice(i, i + 2));
+  return g;
+}
+function alikeness(a, b){
+  const wa = coreWords(a), wb = coreWords(b);
+  return Math.max(setDice(new Set(wa), new Set(wb)),
+                  setDice(pairsOf(wa.join('')), pairsOf(wb.join(''))));
+}
+
+function sameStoreIn(shop, year){
+  const pool = D.shops.filter(s => s.operating_year === year);
+  if (!pool.length) return null;
+  if (shop.store_number){
+    const byNumber = pool.find(s => s.store_number === shop.store_number);
+    if (byNumber) return byNumber;
+  }
+  const exact = pool.find(s => key(s.name) === key(shop.name));
+  if (exact) return exact;
+
+  // Same city only, or the names alone lead you astray.
+  const near = shop.city_id ? pool.filter(s => s.city_id === shop.city_id) : pool;
+  const scored = near.map(s => ({s, v: alikeness(shop, s)})).sort((a, b) => b.v - a.v);
+  const best = scored[0], second = scored[1];
+  if (best && best.v >= 0.6 && (!second || best.v - second.v >= 0.08)) return best.s;
+  return null;
+}
+
+function hopSeason(dir, fromId){
   const years = seasonList();
   const here = years.indexOf(filters.year);
   if (here < 0) return;
@@ -900,21 +941,19 @@ function hopSeason(dir, storeName){
     toast(dir > 0 ? 'No later season yet' : 'No earlier season');
     return;
   }
+  const from = fromId ? D.shops.find(s => s.id === fromId) : null;
+  const landed = from ? sameStoreIn(from, next) : null;
+
   filters.year = next; lastSeason = next;
+  hereStore = landed ? landed.id : null;
   render();
-  const rows = [...document.querySelectorAll('#list .row')];
-  const match = storeName ? rows.find(r => r.dataset.name === storeName) : null;
-  if (!storeName){ toast(next); return; }
-  if (match){
-    if (typeof match.scrollIntoView === 'function')
-      match.scrollIntoView({block:'center', behavior:'smooth'});
-    document.querySelectorAll('.row.here').forEach(r => r.classList.remove('here'));
-    match.classList.add('here');
-    hereStore = storeName;
-    toast(next);
-  } else {
-    toast(`${storeName} isn't in ${next}`);
-  }
+
+  if (!from){ toast(next); return; }
+  if (!landed){ toast(`${from.name} isn't in ${next}`); return; }
+  const row = document.querySelector(`#list .row[data-id="${landed.id}"]`);
+  if (row && typeof row.scrollIntoView === 'function')
+    row.scrollIntoView({block:'center', behavior:'smooth'});
+  toast(key(landed.name) === key(from.name) ? next : `${next} · ${landed.name}`);
 }
 
 function wireSwipe(box){
@@ -928,7 +967,7 @@ function wireSwipe(box){
     if (!row && !box.classList.contains('yearhead')){ name = null; return; }
     if (e.target.closest('input, select, textarea, a')){ name = null; return; }
     x0 = e.touches[0].clientX; y0 = e.touches[0].clientY;
-    name = row ? row.dataset.name : '';        // '' means "no particular store"
+    name = row ? Number(row.dataset.id) : 0;   // 0 means "no particular store"
   }, {passive:true});
 
   box.addEventListener('touchend', e => {
@@ -1159,9 +1198,8 @@ function helpScreen(){
       People, Malls, Types, Cities, Help and, if you can edit, Import.</p>
       <p><b>Stores</b> opens on the current season, with the season and the store count
       pinned at the top along with the search box, so they stay put as you scroll. The
-      dropdowns underneath narrow by status, area and sort order, and they work
-      together. <b>Every season at once</b> lifts the season filter when you want to
-      see everything.</p>
+      dropdowns underneath narrow by sort order, status and area, and they work
+      together. Sorting starts on build date each time.</p>
       <p>The search box matches store names, cities, malls, store types and the people
       attached — so typing a builder's name finds every store they worked on. Several
       words all have to match, so <i>helen derby</i> finds Derby stores Helen was on.</p>
@@ -1171,7 +1209,11 @@ function helpScreen(){
       date is the default. Tick <b>Default</b> beside it to open on a different order
       next time.</p>
       <p>On a phone, <b>swipe sideways</b> — on a store card or on the pinned season at
-      the top — to move between seasons. Dragging right to left steps back a year, left to right goes forward. The
+      the top — to move between seasons. It follows the same store across, even where
+      the name has drifted: "Bury Mill Gate" one year and "Bury Millgate" the next are
+      recognised as the same shop, and the message names it when it lands on a
+      differently spelled one. Where a store genuinely didn't run that season it says
+      so rather than guessing. Dragging right to left steps back a year, left to right goes forward. The
       sort and filters stay as they are, and the store you swiped is scrolled to and
       outlined for a couple of seconds. It needs a season chosen rather than "All
       years".</p>
@@ -1775,21 +1817,10 @@ function listScreen(t){
 function wireList(){
   const q = document.getElementById('q');
   if (q) q.oninput = () => { filters.q = q.value; drawList(); };
-  const ay = document.getElementById('allyears');
-  if (ay) ay.onchange = () => {
-    filters.year = ay.value === 'all' ? '' : (lastSeason || currentYear());
-    render();
-  };
   const st = document.getElementById('status');
   if (st) st.onchange = () => { filters.status = st.value; drawList(); };
   const so = document.getElementById('sort');
-  if (so) so.onchange = () => {
-    filters.sort = so.value;
-    if (document.getElementById('sortdef').checked) rememberSort(so.value);
-    render();
-  };
-  const sd = document.getElementById('sortdef');
-  if (sd) sd.onchange = () => rememberSort(sd.checked ? filters.sort : '');
+  if (so) so.onchange = () => { filters.sort = so.value; render(); };
   const tmf = document.getElementById('tm');
   if (tmf) tmf.onchange = () => { filters.tm = tmf.value; rememberTM(tmf.value); render(); };
   const nb = document.getElementById('new');
@@ -1836,7 +1867,7 @@ function drawList(){
   if (tab === 'shops'){
     wireSwipe(box);
     if (hereStore){
-      const lit = [...box.querySelectorAll('.row')].find(r => r.dataset.name === hereStore);
+      const lit = box.querySelector(`.row[data-id="${hereStore}"]`);
       if (lit) lit.classList.add('here');
     }
     box.querySelectorAll('.row a[href^="tel:"], .row a[href^="https://wa.me/"]')
@@ -2576,7 +2607,7 @@ async function start(){
       return;
     }
     filters.year = currentYear();
-    filters.sort = recallSort() || 'build';
+    filters.sort = 'build';
     const saved = recallTM();
     const me = D.people.find(p => isTM(p) && p.email &&
       p.email.toLowerCase() === session.user.email.toLowerCase());
