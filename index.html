@@ -320,6 +320,19 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .mapwrap{border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
   background:var(--sink)}
 .mapwrap iframe{display:block; width:100%; height:280px; border:0}
+.pickwrap{position:fixed; inset:0; z-index:60; background:var(--paper); display:flex;
+  flex-direction:column; padding-top:env(safe-area-inset-top)}
+.pickbar{display:flex; align-items:center; gap:10px; padding:10px 14px;
+  border-bottom:1px solid var(--line)}
+.pickbar .ttl{font-weight:700; flex:1; text-align:center; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+.picksearch{display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:10px 14px}
+.picksearch input{flex:1 1 180px; min-width:0; padding:9px 11px; border:1px solid var(--line);
+  border-radius:8px; background:var(--card)}
+#pickmap{flex:1; min-height:240px}
+.coordrow{display:flex; gap:8px; align-items:center}
+.coordrow input{flex:1; min-width:0}
+.coordrow .btn{white-space:nowrap; padding:8px 12px}
 .shots{display:flex; flex-wrap:wrap; gap:10px}
 .shot{position:relative; margin:0; width:132px; height:132px; border-radius:var(--radius);
   overflow:hidden; background:var(--sink); border:1px solid var(--line)}
@@ -739,8 +752,8 @@ function mapBlock(rec){
     const q = encodeURIComponent(address || rec.name);
     return `<section class="grp"><h3>Where it is</h3>
       ${address ? `<p>${esc(address)}</p>` : '<p class="rmeta">No address yet.</p>'}
-      <p class="rmeta">No coordinates stored, so there's nothing to pin. Paste a
-      "latitude,longitude" pair into Store location and the map appears.</p>
+      <p class="rmeta">No coordinates stored, so there's nothing to pin. Tap Edit, then
+      <b>Map</b> beside Store location, and drop a pin.</p>
       <a class="btn" style="display:inline-block;margin-top:8px;text-decoration:none"
         href="https://www.google.com/maps/search/?api=1&query=${q}"
         target="_blank" rel="noopener">Search this address</a></section>`;
@@ -757,7 +770,7 @@ function mapBlock(rec){
       loading="lazy" referrerpolicy="no-referrer"></iframe></div>
     <div class="addp" style="margin-top:10px">
       ${spots.map(([label, c]) => `<a class="btn" style="text-decoration:none"
-        href="https://www.google.com/maps/dir/?api=1&destination=${c[0]},${c[1]}"
+        href="${esc(directionsLink(c[0], c[1]))}"
         target="_blank" rel="noopener">Directions to ${esc(label.toLowerCase())}</a>`).join('')}
       ${rec.parking_what3words && rec.parking_what3words.length > 16
         ? `<a class="btn" style="text-decoration:none" href="${esc(rec.parking_what3words)}"
@@ -1316,6 +1329,119 @@ function wireCombos(root){
   });
 }
 
+/* ------------------------------------------------------- picking a spot on a map
+   Coordinates are still stored as "lat,lon" text, but nobody has to type them. */
+let pickFor = null, pickMap = null, pickPin = null;
+
+function loadLeaflet(){
+  if (window.L) return Promise.resolve();
+  return new Promise((done, fail) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css';
+    document.head.appendChild(css);
+    const js = document.createElement('script');
+    js.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
+    js.onload = () => done();
+    js.onerror = () => fail(new Error('Could not load the map.'));
+    document.head.appendChild(js);
+  });
+}
+
+// Whatever the phone or laptop uses for maps, rather than forcing one of them.
+function directionsLink(lat, lon){
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod|Macintosh/.test(ua)) return `https://maps.apple.com/?daddr=${lat},${lon}`;
+  if (/Android/.test(ua)) return `geo:0,0?q=${lat},${lon}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+}
+
+function mapsLink(v){
+  const c = coordsOf(v);
+  if (!c) return '';
+  const [lat, lon] = c;
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod|Macintosh/.test(ua)) return `https://maps.apple.com/?q=${lat},${lon}`;
+  if (/Android/.test(ua)) return `geo:${lat},${lon}?q=${lat},${lon}`;
+  return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+}
+
+function closePicker(){
+  document.getElementById('pickwrap')?.remove();
+  pickFor = null; pickMap = null; pickPin = null;
+}
+
+async function openPicker(fieldName, label){
+  const input = document.querySelector(`[name="${fieldName}"]`);
+  if (!input) return;
+  pickFor = input;
+
+  const el = document.createElement('div');
+  el.className = 'pickwrap'; el.id = 'pickwrap';
+  el.innerHTML = `
+    <div class="pickbar">
+      <button type="button" class="btn" id="pickcancel">Cancel</button>
+      <span class="ttl">${esc(label)}</span>
+      <button type="button" class="btn primary" id="pickuse">Use this spot</button>
+    </div>
+    <div class="picksearch">
+      <input id="picksearch" placeholder="Postcode or address" autocomplete="off">
+      <button type="button" class="btn" id="pickgo">Find</button>
+      <span class="rmeta" id="pickmsg">Tap the map to move the pin</span>
+    </div>
+    <div id="pickmap"></div>`;
+  document.body.appendChild(el);
+
+  el.querySelector('#pickcancel').onclick = closePicker;
+
+  try { await loadLeaflet(); }
+  catch (e){
+    el.querySelector('#pickmap').innerHTML =
+      `<div class="empty-state">${esc(e.message)} Type the coordinates by hand instead.</div>`;
+    return;
+  }
+
+  // Start where the field already points, or on another spot at the same mall.
+  const form = document.getElementById('form');
+  const near = ['store_location','delivery_location','parking_location']
+    .map(k => form && form.elements[k] ? form.elements[k].value : '')
+    .map(coordsOf).find(Boolean);
+  const start = coordsOf(input.value) || near || [54.0, -2.4];
+  const zoom = (coordsOf(input.value) || near) ? 17 : 6;
+
+  pickMap = L.map('pickmap').setView(start, zoom);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap contributors'}).addTo(pickMap);
+  pickPin = L.marker(start, {draggable:true}).addTo(pickMap);
+
+  pickMap.on('click', e => pickPin.setLatLng(e.latlng));
+
+  el.querySelector('#pickuse').onclick = () => {
+    const p = pickPin.getLatLng();
+    input.value = `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+    closePicker();
+  };
+
+  const find = async () => {
+    const q = el.querySelector('#picksearch').value.trim();
+    if (!q) return;
+    const msg = el.querySelector('#pickmsg');
+    msg.textContent = 'Looking…';
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' +
+        encodeURIComponent(q));
+      const hits = await r.json();
+      if (!hits.length){ msg.textContent = 'Nothing found for that'; return; }
+      const at = [Number(hits[0].lat), Number(hits[0].lon)];
+      pickMap.setView(at, 17); pickPin.setLatLng(at);
+      msg.textContent = 'Tap the map to move the pin';
+    } catch (e){ msg.textContent = 'Could not search just now'; }
+  };
+  el.querySelector('#pickgo').onclick = find;
+  el.querySelector('#picksearch').onkeydown = e => { if (e.key === 'Enter'){ e.preventDefault(); find(); } };
+}
+
 function helpScreen(){
   const can = canEdit('shops');
   const q = (h, body) => `<section class="grp"><h3>${h}</h3>${body}</section>`;
@@ -1404,12 +1530,15 @@ function helpScreen(){
       Store Staff, TM, Management and Centre Management ticked. Somebody can be a TM
       and still build. Only people with TM ticked appear in the TM dropdown and the
       area filter.</p>
+      <p>The three positions on a mall — store, delivery point and parking — are set by
+      tapping <b>Map</b> beside the field while editing. Drop a pin by tapping the map,
+      or type a postcode and press Find to jump there first. Tapping a stored position
+      opens it in whatever maps app your phone or laptop uses.</p>
       <p><b>Malls</b> holds the centres. Each one shows its address on a map with a pin,
       directions to the store, the delivery point and the parking, and the centre
       contact with tappable phone and email. The contact is chosen from the People
       list, so add them there first if they're not on it. The pin comes from the
-      "latitude,longitude" pairs in the location fields — paste one in and the map
-      appears.</p>
+      three positions above.</p>
       <p><b>Photos</b> can be added to any store, person or mall — pick several at once
       if you like. They're resized on your device before uploading, and they're
       private: the app fetches a link that expires after an hour, so a photo address
@@ -2199,8 +2328,12 @@ function drawSheet(){
       <div class="err" id="err"></div>
     </div>`;
 
-  document.getElementById('sheet')?.remove();
+  // Redrawing replaces the whole sheet, so put the reader back where they were.
+  const old = document.getElementById('sheet');
+  const wasAt = old ? old.scrollTop : 0;
+  old?.remove();
   document.body.appendChild(el);
+  if (wasAt) el.scrollTop = wasAt;
 
   el.querySelector('#back').onclick = () => { editing ? (editing = false, drawSheet()) : closeSheet(); };
   el.querySelector('#edit')?.addEventListener('click', () => { editing = true; drawSheet(); });
@@ -2230,6 +2363,8 @@ function drawSheet(){
       logIt(how, t, openRec.id, (who || '').trim() || null);
     }));
   wireCombos(el);
+  el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () =>
+    openPicker(b.dataset.pick, b.dataset.picklabel));
   el.querySelectorAll('[data-profile]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     makeProfile(Number(b.dataset.profile));
@@ -2365,7 +2500,9 @@ function fieldHtml([k, label, type], rec){
     else shown = v ?? '';
 
     if (type === 'url' && v) body = `<div class="val"><a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.length > 60 ? v.slice(0,60) + '…' : v)}</a></div>`;
-    else if (type === 'coords' && v) body = `<div class="val"><a href="https://www.google.com/maps?q=${encodeURIComponent(v)}" target="_blank" rel="noopener">Open in maps</a></div>`;
+    else if (type === 'coords' && v) body = `<div class="val">
+      <a href="${esc(mapsLink(v))}" target="_blank" rel="noopener">Open in maps</a>
+      <span class="rmeta" style="display:block">${esc(v)}</span></div>`;
     else body = `<div class="val${shown === '' ? ' empty' : ''}">${esc(shown === '' ? '—' : shown)}</div>`;
     return `<div class="f${wide}"><label>${esc(label)}</label>${body}</div>`;
   }
@@ -2377,6 +2514,13 @@ function fieldHtml([k, label, type], rec){
       `<label class="rolechk"><input type="checkbox" name="roles" value="${esc(r)}"
         ${have.includes(r) ? 'checked' : ''}> ${esc(r)}</label>`).join('')}</div>`;
     return `<div class="f wide"><label>${esc(label)}</label>${body}</div>`;
+  }
+  if (type === 'coords'){
+    return `<div class="f"><label>${esc(label)}</label>
+      <div class="coordrow">
+        <input type="text" name="${k}" value="${esc(val)}" placeholder="Not set">
+        <button type="button" class="btn" data-pick="${k}" data-picklabel="${esc(label)}">Map</button>
+      </div></div>`;
   }
   if (type === 'area'){
     const areas = [...new Set(D.people.map(p => p.area).filter(Boolean))].sort();
