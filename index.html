@@ -74,6 +74,16 @@ header.top{
 .yearrow{display:flex; align-items:center; gap:12px}
 .yearrow .dot{width:14px; height:14px; border-radius:50%; flex:0 0 auto}
 .yearrow .yr{font-size:30px; font-weight:700; letter-spacing:-0.03em; line-height:1}
+.yrpick{
+  -webkit-appearance:none; appearance:none; background:transparent; border:0;
+  padding:0 22px 0 0; margin:0; font:inherit; font-size:30px; font-weight:700;
+  letter-spacing:-0.03em; cursor:pointer; max-width:100%;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),
+    linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 10px) 60%, calc(100% - 4px) 60%;
+  background-size:6px 6px, 6px 6px; background-repeat:no-repeat;
+}
+.yrpick:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
 .yearrow .cnt{font-size:13.5px; color:var(--muted); margin-left:auto; text-align:right; line-height:1.25}
 .yearrow .cnt b{display:block; font-size:19px; font-weight:700; color:var(--ink)}
 .yearhead .search{width:100%; margin-top:10px}
@@ -214,6 +224,8 @@ section.grp.later{opacity:.72}
   text-transform:uppercase; color:var(--muted); margin-bottom:3px}
 .head .big b{font-size:21px; font-weight:700; letter-spacing:-0.02em; line-height:1.15}
 .head .big b small{font-size:13px; font-weight:500; color:var(--muted); display:block}
+.head .big b .dow{display:block; font-size:13.5px; font-weight:600; color:var(--muted);
+  letter-spacing:0; margin-bottom:1px}
 .ticks{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px}
 .tick{font-size:12.5px; font-weight:600; padding:3px 10px; border-radius:20px;
   background:var(--card); border:1px solid var(--line); color:var(--muted)}
@@ -275,6 +287,23 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .plink .x{margin-left:8px; color:var(--accent); background:none; border:0; cursor:pointer; font-size:16px}
 .addp{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
 .addp select{flex:1 1 150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card)}
+.combo{position:relative; flex:1 1 190px; min-width:0}
+.combo .comboin{
+  width:100%; padding:9px 30px 9px 11px; border:1px solid var(--line);
+  border-radius:8px; background:var(--card);
+}
+.comboclear{
+  position:absolute; right:4px; top:50%; transform:translateY(-50%); width:24px; height:24px;
+  border:0; background:none; color:var(--muted); font-size:17px; line-height:1; cursor:pointer;
+}
+.combolist{
+  position:absolute; left:0; right:0; top:calc(100% + 3px); z-index:50; margin:0;
+  padding:4px; list-style:none; max-height:260px; overflow-y:auto; background:var(--card);
+  border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 22px rgba(0,0,0,.16);
+}
+.combolist li{padding:9px 11px; border-radius:6px; cursor:pointer; font-size:15.5px}
+.combolist li.on, .combolist li:hover{background:var(--sink)}
+.combolist li.none{color:var(--muted); cursor:default}
 .rolebox{display:flex; flex-wrap:wrap; gap:8px}
 .rolechk{display:flex; align-items:center; gap:7px; padding:7px 12px; border:1px solid var(--line);
   border-radius:20px; background:var(--card); font-size:14px; cursor:pointer}
@@ -390,6 +419,14 @@ const narrow = () => typeof window.matchMedia === 'function'
   : window.innerWidth > 0 && window.innerWidth <= 620;
 const ukDate = d => !d ? '' :
   new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'});
+// With the day of the week, for anything to do with planning a build.
+const dayName = d => !d ? '' :
+  new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {weekday:'long'});
+const dayShort = d => !d ? '' :
+  new Date(d + 'T00:00:00').toLocaleDateString('en-GB', {weekday:'short'});
+const ukDay = d => !d ? '' :
+  new Date(d + 'T00:00:00').toLocaleDateString('en-GB',
+    {weekday:'long', day:'numeric', month:'short', year:'numeric'});
 
 function daysOpen(s){
   if (!s.opening_date || !s.closedown_date) return null;
@@ -469,7 +506,6 @@ const SHOP_FIELDS = [
     ['operator_status','Operator status','opt:No Operator|Possible|Confirmed|Cancelled|Final Commissions Paid'],
     ['contract_signed','Contract','opt:Awaiting|Sent Form|Form Signed'],
     ['lease_status','Lease status','text'],
-    ['lock_in_year','Locked to this year','bool'],
   ]],
   ['Dates', [
     ['build_date','Build date','date'], ['opening_date','Opening date','date'],
@@ -613,6 +649,10 @@ function render(){
   };
   const head = document.getElementById('yearhead');
   if (head) wireSwipe(head);
+  const yp = document.getElementById('yearpick');
+  if (yp) yp.onchange = () => {
+    filters.year = yp.value; lastSeason = yp.value; hereStore = null; render();
+  };
   if (tab === 'import') wireImport();
   else if (tab === 'activity') wireActivity();
   else if (tab === 'wishes') wireWishes();
@@ -629,7 +669,9 @@ function yearHead(){
   return `<div class="yearhead" id="yearhead">
     <div class="yearrow">
       ${filters.year ? `<span class="dot" style="background:${ink}"></span>` : ''}
-      <span class="yr" style="color:${ink}">${esc(filters.year || 'All years')}</span>
+      <select class="yr yrpick" id="yearpick" style="color:${ink}"
+        aria-label="Season">${seasonList().slice().reverse().map(y =>
+        `<option ${y === filters.year ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>
       <span class="cnt"><b>${shown.length}</b>${shown.length === 1 ? 'store' : 'stores'}</span>
     </div>
     <input class="search" id="q" placeholder="Search store, city, mall or person"
@@ -1185,6 +1227,95 @@ async function wireWishes(){
   drawWishes();
 }
 
+/* ------------------------------------------------------- type-to-find pickers
+   Seventy-odd people is too many to scroll, so these filter as you type.
+   The chosen person's id lands in a hidden field with the same id the old
+   dropdown had, so everything reading it carries on working. */
+const comboOpts = {};
+
+function comboHtml(id, options, placeholder, chosenId){
+  comboOpts[id] = options;
+  const chosen = options.find(o => String(o.id) === String(chosenId));
+  return `<div class="combo" data-for="${id}">
+    <input type="text" class="comboin" autocomplete="off" role="combobox"
+      aria-expanded="false" placeholder="${esc(placeholder)}"
+      value="${esc(chosen ? chosen.label : '')}">
+    <input type="hidden" id="${id}" value="${chosen ? chosen.id : ''}">
+    <button type="button" class="comboclear" aria-label="Clear">×</button>
+    <ul class="combolist" hidden></ul>
+  </div>`;
+}
+
+function wireCombos(root){
+  (root || document).querySelectorAll('.combo').forEach(box => {
+    if (box.dataset.wired) return;
+    box.dataset.wired = '1';
+    const key = box.dataset.for;
+    const text = box.querySelector('.comboin');
+    const hidden = box.querySelector('input[type="hidden"]');
+    const list = box.querySelector('.combolist');
+    const clear = box.querySelector('.comboclear');
+    let marked = -1;
+
+    const matches = () => {
+      const q = text.value.trim().toLowerCase();
+      const all = comboOpts[key] || [];
+      if (!q) return all.slice(0, 10);
+      // Favour names that start with what was typed, then anything containing it.
+      const starts = all.filter(o => o.label.toLowerCase().startsWith(q));
+      const words = all.filter(o => !starts.includes(o) &&
+        o.label.toLowerCase().split(/\s+/).some(w => w.startsWith(q)));
+      const rest = all.filter(o => !starts.includes(o) && !words.includes(o) &&
+        o.label.toLowerCase().includes(q));
+      return [...starts, ...words, ...rest].slice(0, 10);
+    };
+
+    const draw = () => {
+      const rows = matches();
+      marked = -1;
+      list.innerHTML = rows.length
+        ? rows.map(o => `<li data-id="${o.id}">${esc(o.label)}</li>`).join('')
+        : '<li class="none">No one matches</li>';
+      list.hidden = false;
+      text.setAttribute('aria-expanded', 'true');
+      list.querySelectorAll('li[data-id]').forEach(li => li.onmousedown = e => {
+        e.preventDefault();
+        pick(li.dataset.id, li.textContent);
+      });
+    };
+
+    const shut = () => { list.hidden = true; text.setAttribute('aria-expanded', 'false'); };
+
+    const pick = (id, label) => {
+      hidden.value = id; text.value = label; shut();
+      hidden.dispatchEvent(new Event('change', {bubbles:true}));
+    };
+
+    text.oninput = () => { hidden.value = ''; draw(); };
+    text.onfocus = draw;
+    text.onblur = () => setTimeout(shut, 120);
+    text.onkeydown = e => {
+      const items = [...list.querySelectorAll('li[data-id]')];
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+        e.preventDefault();
+        if (list.hidden) return draw();
+        marked += e.key === 'ArrowDown' ? 1 : -1;
+        if (marked < 0) marked = items.length - 1;
+        if (marked >= items.length) marked = 0;
+        items.forEach((li, i) => li.classList.toggle('on', i === marked));
+        if (items[marked]) items[marked].scrollIntoView?.({block:'nearest'});
+      } else if (e.key === 'Enter'){
+        if (!list.hidden && items.length){
+          e.preventDefault();
+          const li = items[marked >= 0 ? marked : 0];
+          pick(li.dataset.id, li.textContent);
+        }
+      } else if (e.key === 'Escape'){ shut(); }
+    };
+    clear.onclick = () => { hidden.value = ''; text.value = ''; text.focus(); draw(); };
+  });
+}
+
 function helpScreen(){
   const can = canEdit('shops');
   const q = (h, body) => `<section class="grp"><h3>${h}</h3>${body}</section>`;
@@ -1208,6 +1339,8 @@ function helpScreen(){
       <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
       date is the default. Tick <b>Default</b> beside it to open on a different order
       next time.</p>
+      <p>The <b>season at the top is a dropdown</b> — tap it to jump straight to any
+      year, which is the way to do it on a laptop.</p>
       <p>On a phone, <b>swipe sideways</b> — on a store card or on the pinned season at
       the top — to move between seasons. It follows the same store across, even where
       the name has drifted: "Bury Mill Gate" one year and "Bury Millgate" the next are
@@ -1230,6 +1363,8 @@ function helpScreen(){
       build date and countdown, start and pallet times, store type with how many
       builders it needs, the operator, who's booked, and the opening date. Once the
       store opens it switches to the operator, the dates and budget against actual.</p>
+      <p>Build, opening and closing dates carry the day of the week, since that is
+      usually what you need when booking a build.</p>
       <p>The coloured pills are the readiness checks — delivery, RAMS &amp; SIPS and
       head office sign-off. Green is done, red is not.</p>
       <p>The thin bar underneath is the trading window drawn across September to
@@ -1258,8 +1393,9 @@ function helpScreen(){
       section you're in. On Stores: choose the city first, then the
       store from the list of previous ones — that fills in the name, mall, store type
       and TM, and brings across the builders and staff who were on it.</p>
-      <p>The operator is deliberately left blank each season. Set it from the Operator
-      dropdown before saving. If they're new, add them on the <b>People</b> tab first
+      <p>The operator is deliberately left blank each season. Start typing a name in the
+      Operator box and it narrows as you type — the same goes for builders, staff and
+      the TM, which is quicker than scrolling seventy-odd people. If they're new, add them on the <b>People</b> tab first
       with Operator ticked, or they won't appear.</p>
       <p>Dates and figures always start empty.</p>`)}
 
@@ -1908,7 +2044,7 @@ function shopRow(s){
 
   // Before opening it's the build that matters; after it, the takings.
   const foot = (phase === 'planning' || phase === 'build')
-    ? `${s.build_date ? `<span><b>Build ${esc(ukDate(s.build_date))}</b>${
+    ? `${s.build_date ? `<span><b>Build ${esc(dayShort(s.build_date))} ${esc(ukDate(s.build_date))}</b>${
           whenLabel(s.build_date) ? ' · ' + esc(whenLabel(s.build_date)) : ''}</span>`
        : '<span>No build date</span>'}
        ${need ? `<span class="${builders.length >= need ? 'money' : ''}">${
@@ -2093,6 +2229,7 @@ function drawSheet(){
         ? (a.closest('.opcard').querySelector('.nm') || {}).textContent : '';
       logIt(how, t, openRec.id, (who || '').trim() || null);
     }));
+  wireCombos(el);
   el.querySelectorAll('[data-profile]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     makeProfile(Number(b.dataset.profile));
@@ -2220,7 +2357,7 @@ function fieldHtml([k, label, type], rec){
     else if (type.startsWith('ref:')) shown = nameOf(type.slice(4), v);
     else if (type === 'bool') shown = v == null ? '' : (v ? 'Yes' : 'No');
     else if (type === 'money') shown = money2(v);
-    else if (type === 'date') shown = ukDate(v);
+    else if (type === 'date') shown = ukDay(v);
     else if (type === 'datetime') shown = v ? new Date(v).toLocaleString('en-GB',
       {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'}) : '';
     else if (type === 'time') shown = v ? String(v).slice(0,5) : '';
@@ -2250,9 +2387,13 @@ function fieldHtml([k, label, type], rec){
   if (type === 'tm'){
     const tms = D.people.filter(p => isTM(p) || p.id === v)
       .sort((a,b) => a.name.localeCompare(b.name));
-    body = `<select name="${k}"><option value="">—</option>${tms.map(p =>
-      `<option value="${p.id}" ${p.id === v ? 'selected' : ''}>${esc(personLabel(p))}</option>`
-      ).join('')}</select>`;
+    body = comboHtml('fld_' + k, tms.map(p => ({id:p.id, label:personLabel(p)})),
+                     'Start typing a name…', v);
+    return `<div class="f"><label>${esc(label)}</label>${body}</div>`;
+  }
+  if (type === 'ref:people'){
+    body = comboHtml('fld_' + k, [...D.people].sort((a,b) => a.name.localeCompare(b.name))
+      .map(p => ({id:p.id, label:p.name})), 'Start typing a name…', v);
     return `<div class="f"><label>${esc(label)}</label>${body}</div>`;
   }
   if (type.startsWith('ref:')){
@@ -2293,21 +2434,25 @@ function headBlock(s, phase){
   const hhmm = t => t ? String(t).slice(0,5) : '';
   const item = (l, v, sub) => !v ? '' :
     `<div><label>${esc(l)}</label><b>${esc(v)}${sub ? `<small>${esc(sub)}</small>` : ''}</b></div>`;
+  // Dates carry the day of the week on a line of their own.
+  const dateItem = (l, d, sub) => !d ? '' :
+    `<div><label>${esc(l)}</label><b><span class="dow">${esc(dayName(d))}</span>${
+      esc(ukDate(d))}${sub ? `<small>${esc(sub)}</small>` : ''}</b></div>`;
 
   let big;
   if (phase === 'trading' || phase === 'closed'){
     big = [
       item('Operator', ops.join(' & ') || 'None'),
-      item('Opened', ukDate(s.opening_date)),
-      item(phase === 'closed' ? 'Closed' : 'Closes', ukDate(s.closedown_date),
-           phase === 'trading' ? whenLabel(s.closedown_date) : ''),
+      dateItem('Opened', s.opening_date),
+      dateItem(phase === 'closed' ? 'Closed' : 'Closes', s.closedown_date,
+               phase === 'trading' ? whenLabel(s.closedown_date) : ''),
       item('Budget', money(s.budget)),
       item('Actual', money(s.actual), variation(s) == null ? '' :
         (variation(s) >= 0 ? '+' : '−') + Math.abs(variation(s)).toFixed(1) + '% on budget'),
     ];
   } else {
     big = [
-      item('Build', ukDate(s.build_date), whenLabel(s.build_date)),
+      dateItem('Build', s.build_date, whenLabel(s.build_date)),
       item('On the day', hhmm(s.build_start_time),
            s.pallet_delivery_time ? 'pallets ' + hhmm(s.pallet_delivery_time) : ''),
       item('Store type', nameOf('store_types', s.type_id),
@@ -2315,7 +2460,7 @@ function headBlock(s, phase){
       item('Operator', ops.join(' & ') || 'None yet'),
       item('Builders', builders.join(', ') || 'None yet',
            need ? builders.length + ' of ' + need + ' booked' : ''),
-      item('Opens', ukDate(s.opening_date), whenLabel(s.opening_date)),
+      dateItem('Opens', s.opening_date, whenLabel(s.opening_date)),
     ];
   }
 
@@ -2394,10 +2539,10 @@ function operatorSection(rec){
   if (!openRec.id){
     return `<section class="grp"><h3>Operator</h3>
       <div class="f wide"><label>Who is running it</label>
-        <select id="newop" ${mayEdit ? '' : 'disabled'}>
-          <option value="">Not decided yet</option>
-          ${candidates.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
-        </select></div>
+        ${mayEdit
+          ? comboHtml('newop', candidates.map(p => ({id:p.id, label:p.name})),
+                      'Start typing a name…', '')
+          : '<div class="val empty">—</div>'}</div>
       <p class="rmeta" style="margin:8px 0 0">Deliberately blank — last year's operator
       is not carried over. If they're new, add them on the People tab first with
       Operator ticked.</p></section>`;
@@ -2422,8 +2567,8 @@ function operatorSection(rec){
   return `<section class="grp"><h3>Operator</h3>
     ${cards || '<div class="rmeta">No operator yet.</div>'}
     ${!mayEdit ? '' : `<div class="addp">
-      <select id="opsel"><option value="">Choose an operator…</option>${
-        candidates.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      ${comboHtml('opsel', candidates.map(p => ({id:p.id, label:p.name})),
+                   'Start typing a name…', '')}
       <button type="button" class="btn" id="addop">${ops.length ? 'Add another' : 'Set operator'}</button>
     </div>`}</section>`;
 }
@@ -2441,9 +2586,8 @@ function peopleBlock(s){
         </div>`).join('') : '<div class="rmeta">No builders or staff attached yet.</div>'}
     </div>
     ${!mayEdit ? '' : `<div class="addp">
-      <select id="np"><option value="">Choose a person…</option>${
-        [...D.people].sort((a,b) => a.name.localeCompare(b.name))
-          .map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+      ${comboHtml('np', [...D.people].sort((a,b) => a.name.localeCompare(b.name))
+          .map(p => ({id:p.id, label:p.name})), 'Start typing a name…', '')}
       <select id="nr">${roles.map(r => `<option>${r}</option>`).join('')}</select>
       <button type="button" class="btn" id="addlink">Add</button>
     </div>`}</section>`;
@@ -2472,7 +2616,7 @@ function collect(t, rec){
       out.roles = [...form.querySelectorAll('input[name="roles"]:checked')].map(b => b.value);
       return;
     }
-    const el = form.elements[k];
+    const el = form.elements[k] || document.getElementById('fld_' + k);
     if (!el) return;
     let v = el.value;
     if (v === '') { out[k] = null; return; }
