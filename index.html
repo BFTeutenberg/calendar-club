@@ -122,6 +122,14 @@ header.top{
   flex:1 1 220px; min-width:0; padding:10px 12px; border:1px solid var(--line);
   border-radius:var(--radius); background:var(--card);
 }
+.searchbox{position:relative; flex:1 1 220px; min-width:0; display:flex}
+.searchbox .search{flex:1; padding-right:38px}
+.searchbox .clearq{
+  position:absolute; right:4px; top:50%; transform:translateY(-50%);
+  width:30px; height:30px; border:0; border-radius:50%; background:none;
+  color:var(--muted); font-size:19px; line-height:1; cursor:pointer;
+}
+.searchbox .clearq:hover{background:var(--sink); color:var(--ink)}
 select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--card)}
 .btn{
   padding:10px 14px; border:1px solid var(--line); border-radius:var(--radius);
@@ -164,6 +172,10 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 .avatar img{width:100%; height:100%; object-fit:cover; display:block}
 .avatar.big{width:64px; height:64px}
 .shot.isprofile{outline:3px solid var(--accent); outline-offset:-3px}
+.feature{margin:0 0 14px; border-radius:var(--radius); overflow:hidden;
+  border:1px solid var(--line); background:var(--sink)}
+.feature img{display:block; width:100%; max-height:320px; object-fit:cover; cursor:pointer}
+.feature figcaption{padding:8px 12px; font-size:13.5px; color:var(--muted)}
 .shot .star{position:absolute; bottom:4px; left:4px; border:0; border-radius:20px;
   background:rgba(0,0,0,.6); color:#fff; font-size:11px; font-weight:600;
   padding:3px 9px; cursor:pointer}
@@ -270,6 +282,14 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .f label{display:block; font-size:12px; color:var(--muted); margin-bottom:3px}
 .f .val{min-height:22px; word-break:break-word}
 .f .val.empty{color:var(--muted)}
+.jump{
+  display:inline-flex; align-items:center; gap:6px; max-width:100%;
+  background:var(--sink); border:1px solid var(--line); border-radius:8px;
+  padding:5px 10px 5px 11px; font:inherit; color:var(--ink); cursor:pointer; text-align:left;
+}
+.jump:hover{border-color:var(--accent); color:var(--accent)}
+.jump span{color:var(--muted); font-size:17px; line-height:1}
+.jump:hover span{color:var(--accent)}
 .f input,.f select,.f textarea{
   width:100%; padding:8px 10px; border:1px solid var(--line);
   border-radius:8px; background:var(--card);
@@ -333,6 +353,9 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .coordrow{display:flex; gap:8px; align-items:center}
 .coordrow input{flex:1; min-width:0}
 .coordrow .btn{white-space:nowrap; padding:8px 12px}
+.planrow{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.btn.plan{text-decoration:none; display:inline-flex; align-items:center; gap:7px;
+  max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .shots{display:flex; flex-wrap:wrap; gap:10px}
 .shot{position:relative; margin:0; width:132px; height:132px; border-radius:var(--radius);
   overflow:hidden; background:var(--sink); border:1px solid var(--line)}
@@ -538,8 +561,8 @@ const SHOP_FIELDS = [
     ['commission_pct','Commission %','number'], ['pct_two_plus','% two plus','number'],
   ]],
   ['Notes and files', [
-    ['notes','Notes','textarea'], ['build_plan_url','Build plan','url'],
-    ['layout_url','Mall/shop layout','url'],
+    ['notes','Notes','textarea'], ['build_plan_url','Build plan','pdf'],
+    ['layout_url','Mall/shop layout','pdf'],
   ]],
 ];
 const PERSON_FIELDS = [['Person', [
@@ -673,6 +696,13 @@ function render(){
   if (openRec) drawSheet();
 }
 
+function searchBox(placeholder){
+  return `<div class="searchbox">
+    <input class="search" id="q" placeholder="${esc(placeholder)}" value="${esc(filters.q)}">
+    ${filters.q ? '<button type="button" class="clearq" id="clearq" aria-label="Clear">×</button>' : ''}
+  </div>`;
+}
+
 function yearHead(){
   const shown = D.shops.filter(s =>
     (!filters.year || s.operating_year === filters.year) &&
@@ -687,8 +717,7 @@ function yearHead(){
         `<option ${y === filters.year ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>
       <span class="cnt"><b>${shown.length}</b>${shown.length === 1 ? 'store' : 'stores'}</span>
     </div>
-    <input class="search" id="q" placeholder="Search store, city, mall or person"
-      value="${esc(filters.q)}">
+    ${searchBox('Search store, city, mall or person')}
     ${filters.year ? '<p class="yearhint">Swipe here or on a card to change season</p>' : ''}
   </div>`;
 }
@@ -802,6 +831,16 @@ const photoURL = {};                    // path -> short-lived link
 const photosFor = (subject, id) => (D.photos || [])
   .filter(p => p.subject === subject && p.subject_id === id)
   .sort((a,b) => (a.created_at || '').localeCompare(b.created_at || ''));
+
+// The photo marked "Use as main", shown full width under the headline details.
+function featureShot(subject, rec){
+  const ph = profilePhoto(subject, rec.id);
+  if (!ph) return '';
+  return `<figure class="feature">
+    <img data-path="${esc(ph.path)}" alt="${esc(ph.caption || rec.name)}">
+    ${ph.caption ? `<figcaption>${esc(ph.caption)}</figcaption>` : ''}
+  </figure>`;
+}
 
 function photosBlock(subject, rec){
   const list = photosFor(subject, rec.id);
@@ -1095,7 +1134,7 @@ function activityScreen(){
     <h2 class="detail" style="margin-top:22px">Activity</h2>
     <div class="sub">Everything added, changed, removed or rung, newest first.</div>
     <div class="controls">
-      <input class="search" id="q" placeholder="Search activity" value="${esc(filters.q)}">
+      ${searchBox('Search activity')}
     </div>
     ${!shown.length ? '<div class="empty-state">Nothing logged yet.</div>' :
       `<p class="count">${shown.length} ${shown.length === 1 ? 'entry' : 'entries'}</p>
@@ -1119,7 +1158,7 @@ function activityBlock(t, id){
 
 /* ------------------------------------------------------------- the wishlist
    The same list the contacts app shows: one shared table, two doors into it. */
-let WISHES = [], WISH_APP = 'calendar club', WISH_WHO = {}, wishError = '';
+let WISHES = [], WISH_APP = 'calendar club', WISH_WHO = {}, wishError = '', editingWish = null;
 
 const WISH_STATUS = [['idea','Idea'], ['maybe','Maybe'], ['doing','Doing'],
                      ['done','Done'], ['no','Not doing']];
@@ -1142,8 +1181,8 @@ const wishWho = id => id === session.user.id ? 'you' : (WISH_WHO[id] || 'someone
 function wishScreen(){
   return `
     <h2 class="detail" style="margin-top:22px">Wishlist</h2>
-    <div class="sub">Ideas for these apps. Anyone signed in can add one, and it's the
-      same list the contacts app shows.</div>
+    <div class="sub">Ideas for this app. Anyone signed in can add one and move it along;
+      you can edit or remove your own.</div>
     <div id="wishbody"><div class="empty-state">Loading…</div></div>`;
 }
 
@@ -1158,18 +1197,43 @@ function drawWishes(){
     </section>`;
     return;
   }
+  // Only this app's ideas, plus anything marked for either.
   const live = WISHES.filter(w => w.app === WISH_APP || w.app === 'either');
   const byStatus = {};
   live.forEach(w => (byStatus[w.status] = byStatus[w.status] || []).push(w));
 
-  box.innerHTML = `
-    <div class="controls">
-      <button class="btn ${WISH_APP === 'calendar club' ? 'primary' : ''}"
-        data-wapp="calendar club">Calendar Club</button>
-      <button class="btn ${WISH_APP === 'contacts' ? 'primary' : ''}"
-        data-wapp="contacts">Contacts</button>
-    </div>
+  const card = w => {
+    const mine = w.created_by === session.user.id;
+    if (editingWish === w.id){
+      return `<div class="plink" style="display:block">
+        <div class="f wide"><label>Idea</label>
+          <input id="eTitle" value="${esc(w.title)}"></div>
+        <div class="f wide" style="margin-top:8px"><label>Notes</label>
+          <textarea id="eNotes" rows="2">${esc(w.notes || '')}</textarea></div>
+        <div class="addp" style="margin-top:10px">
+          <button type="button" class="btn primary" data-wsave="${w.id}">Save</button>
+          <button type="button" class="btn" data-wcancel="1">Cancel</button>
+        </div></div>`;
+    }
+    const struck = w.status === 'done' || w.status === 'no';
+    return `<div class="plink" style="display:block">
+      <div style="font-weight:600;${struck
+        ? 'color:var(--muted);text-decoration:line-through' : ''}">${esc(w.title)}</div>
+      ${w.notes ? `<div class="rmeta">${esc(w.notes)}</div>` : ''}
+      <div class="rmeta">from ${esc(wishWho(w.created_by))} · ${esc(
+        new Date(w.created_at).toLocaleDateString('en-GB', {day:'numeric', month:'short'}))}</div>
+      <div class="addp" style="margin-top:8px">
+        ${WISH_STATUS.map(([k, l]) => `<button type="button" class="btn ${
+          w.status === k ? 'primary' : ''}" style="padding:5px 11px;font-size:13.5px"
+          data-wset="${w.id}:${k}">${l}</button>`).join('')}
+        ${mine ? `<button type="button" class="btn" style="padding:5px 11px;font-size:13.5px"
+           data-wedit="${w.id}">Edit</button>
+          <button type="button" class="btn" style="padding:5px 11px;font-size:13.5px;
+           color:var(--accent)" data-wdel="${w.id}">Remove</button>` : ''}
+      </div></div>`;
+  };
 
+  box.innerHTML = `
     <section class="grp"><h3>Add an idea</h3>
       <div class="f wide"><label>What would be good?</label>
         <input id="wTitle" placeholder="In a few words"></div>
@@ -1182,30 +1246,10 @@ function drawWishes(){
       const rows = byStatus[key] || [];
       if (!rows.length) return '';
       return `<section class="grp"><h3>${label} · ${rows.length}</h3>
-        <div class="people-list">${rows.map(w => `
-          <div class="plink" style="display:block">
-            <div style="font-weight:600;${key === 'done' || key === 'no'
-              ? 'color:var(--muted);text-decoration:line-through' : ''}">${esc(w.title)}</div>
-            ${w.notes ? `<div class="rmeta">${esc(w.notes)}</div>` : ''}
-            <div class="rmeta">from ${esc(wishWho(w.created_by))} · ${esc(
-              new Date(w.created_at).toLocaleDateString('en-GB', {day:'numeric', month:'short'}))}</div>
-            <div class="addp" style="margin-top:8px">
-              ${WISH_STATUS.map(([k, l]) => `<button type="button" class="btn ${
-                w.status === k ? 'primary' : ''}" style="padding:5px 11px;font-size:13.5px"
-                data-wset="${w.id}:${k}">${l}</button>`).join('')}
-              ${w.created_by === session.user.id
-                ? `<button type="button" class="btn" style="padding:5px 11px;font-size:13.5px;
-                   color:var(--accent)" data-wdel="${w.id}">Remove</button>` : ''}
-            </div>
-          </div>`).join('')}</div></section>`;
+        <div class="people-list">${rows.map(card).join('')}</div></section>`;
     }).join('')}
 
-    ${!live.length ? `<div class="empty-state">No ideas yet for ${esc(WISH_APP === 'contacts'
-      ? 'the contacts app' : 'Calendar Club')}.</div>` : ''}`;
-
-  box.querySelectorAll('[data-wapp]').forEach(b => b.onclick = () => {
-    WISH_APP = b.dataset.wapp; drawWishes();
-  });
+    ${!live.length ? '<div class="empty-state">No ideas yet.</div>' : ''}`;
 
   const add = document.getElementById('wAdd');
   if (add) add.onclick = async () => {
@@ -1225,6 +1269,26 @@ function drawWishes(){
     const {error} = await db.from('wishes').update({status: st}).eq('id', Number(id));
     if (error){ toast('Could not change that'); return; }
     await loadWishes(); drawWishes();
+  });
+
+  box.querySelectorAll('[data-wedit]').forEach(b => b.onclick = () => {
+    editingWish = Number(b.dataset.wedit); drawWishes();
+    document.getElementById('eTitle')?.focus();
+  });
+  box.querySelectorAll('[data-wcancel]').forEach(b => b.onclick = () => {
+    editingWish = null; drawWishes();
+  });
+  box.querySelectorAll('[data-wsave]').forEach(b => b.onclick = async () => {
+    const id = Number(b.dataset.wsave);
+    const title = document.getElementById('eTitle').value.trim();
+    if (!title){ toast('It needs a title'); return; }
+    b.disabled = true;
+    const {error} = await db.from('wishes').update({
+      title, notes: document.getElementById('eNotes').value.trim() || null}).eq('id', id);
+    if (error){ toast('Could not save it'); b.disabled = false; return; }
+    logIt('changed a wishlist idea', null, null, title);
+    editingWish = null;
+    await loadWishes(); drawWishes(); toast('Saved');
   });
 
   box.querySelectorAll('[data-wdel]').forEach(b => b.onclick = async () => {
@@ -1442,6 +1506,80 @@ async function openPicker(fieldName, label){
   el.querySelector('#picksearch').onkeydown = e => { if (e.key === 'Enter'){ e.preventDefault(); find(); } };
 }
 
+/* ------------------------------------------------------------- plans as files
+   Build plans and layouts were links to Memento's server. Now they can be
+   uploaded, and live in the same private store as the photos. An old http
+   link still works, so nothing already here breaks. */
+const isStored = v => !!v && !/^https?:/i.test(v);
+const planName = v => !v ? '' : isStored(v)
+  ? decodeURIComponent(v.split('/').pop()).replace(/^\d{10,}-/, '').replace(/-/g, ' ')
+  : v;
+
+async function planLink(path){
+  if (!path) return '';
+  if (!isStored(path)) return path;
+  if (photoURL[path]) return photoURL[path];
+  try {
+    const {data} = await db.storage.from('cc-photos').createSignedUrl(path, 3600);
+    if (data && data.signedUrl){ photoURL[path] = data.signedUrl; return data.signedUrl; }
+  } catch (e){ /* fall through */ }
+  return '';
+}
+
+// Fill in any plan link that is waiting on a signed URL.
+async function fillPlans(root){
+  const links = [...(root || document).querySelectorAll('a[data-plan]')];
+  for (const a of links){
+    if (a.getAttribute('href')) continue;
+    const u = await planLink(a.dataset.plan);
+    if (u) a.setAttribute('href', u);
+    else a.replaceWith(Object.assign(document.createElement('span'),
+      {className:'rmeta', textContent:'Could not open that file'}));
+  }
+}
+
+async function uploadPlan(table, id, field, file, label){
+  const status = document.getElementById('planstatus_' + field);
+  const say = t => { if (status) status.textContent = t; };
+  if (!/pdf$/i.test(file.name) && file.type !== 'application/pdf'){
+    say('That needs to be a PDF.'); return;
+  }
+  if (file.size > 25 * 1024 * 1024){ say('That file is over 25MB.'); return; }
+  try {
+    say('Uploading…');
+    const safe = file.name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(-60);
+    const path = `plans/${table}/${id}/${Date.now()}-${safe}`;
+    const up = await db.storage.from('cc-photos')
+      .upload(path, file, {contentType:'application/pdf', upsert:false});
+    if (up.error) throw up.error;
+    const {data, error} = await db.from(TBL[table])
+      .update({[field]: path}).eq('id', id).select().single();
+    if (error) throw error;
+    Object.assign(D[table].find(r => r.id === id), data);
+    logIt('uploaded ' + label.toLowerCase(), table, id, file.name);
+    say('');
+    drawSheet();
+  } catch (e){
+    say('Could not upload it: ' + e.message);
+  }
+}
+
+async function removePlan(table, id, field, label){
+  const rec = D[table].find(r => r.id === id);
+  const was = rec ? rec[field] : null;
+  if (!confirm(`Remove ${label.toLowerCase()}?`)) return;
+  const {data, error} = await db.from(TBL[table])
+    .update({[field]: null}).eq('id', id).select().single();
+  if (error){ toast('Could not remove it'); return; }
+  Object.assign(rec, data);
+  if (isStored(was)){
+    await db.storage.from('cc-photos').remove([was]);
+    delete photoURL[was];
+  }
+  logIt('removed ' + label.toLowerCase(), table, id, null);
+  drawSheet();
+}
+
 function helpScreen(){
   const can = canEdit('shops');
   const q = (h, body) => `<section class="grp"><h3>${h}</h3>${body}</section>`;
@@ -1459,7 +1597,8 @@ function helpScreen(){
       together. Sorting starts on build date each time.</p>
       <p>The search box matches store names, cities, malls, store types and the people
       attached — so typing a builder's name finds every store they worked on. Several
-      words all have to match, so <i>helen derby</i> finds Derby stores Helen was on.</p>
+      words all have to match, so <i>helen derby</i> finds Derby stores Helen was on.
+      The × at the right of the box clears it.</p>
       <p>The <b>area</b> dropdown sticks. Pick your own patch once and it's still there
       next time you sign in on that device.</p>
       <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
@@ -1489,6 +1628,12 @@ function helpScreen(){
       build date and countdown, start and pallet times, store type with how many
       builders it needs, the operator, who's booked, and the opening date. Once the
       store opens it switches to the operator, the dates and budget against actual.</p>
+      <p>The mall, store type, city and TM on a store are buttons — tap one to open that
+      record, then Back to return.</p>
+      <p>The photo marked <b>Use as main</b> is shown large under the headline details.</p>
+      <p><b>Build plan</b> and <b>Mall/shop layout</b> take a PDF each. Tap Edit, then
+      Upload a PDF. They're kept privately alongside the photos, and the link expires
+      after an hour, so a file address can't be passed around.</p>
       <p>Build, opening and closing dates carry the day of the week, since that is
       usually what you need when booking a build.</p>
       <p>The coloured pills are the readiness checks — delivery, RAMS &amp; SIPS and
@@ -1526,7 +1671,8 @@ function helpScreen(){
       <p>Dates and figures always start empty.</p>`)}
 
     ${!can ? '' : q('People, malls and types', `
-      <p><b>People</b> holds everyone, each with any combination of Operator, Builder,
+      <p><b>People</b> holds everyone, with their roles and, for a TM, their initials
+      shown beside the role. Each person has any combination of Operator, Builder,
       Store Staff, TM, Management and Centre Management ticked. Somebody can be a TM
       and still build. Only people with TM ticked appear in the TM dropdown and the
       area filter.</p>
@@ -1544,7 +1690,8 @@ function helpScreen(){
       private: the app fetches a link that expires after an hour, so a photo address
       can't be passed around. <b>Use as main</b> under a photo makes it the one shown
       beside that person in lists, on their own page and on the operator card.</p>
-      <p><b>Types</b> feeds the store type dropdown. Types are never deleted — set
+      <p><b>Types</b> feeds the store type dropdown, and each one shows how many stores
+      have ever used it and how many are on it this season. Types are never deleted — set
       <b>Still in use</b> to No and it drops out of the dropdown while staying on the
       stores that already have it. The <b>Builders required</b> number is what drives
       the "2 of 3 builders" warning on the store list.</p>`)}
@@ -1584,11 +1731,9 @@ function helpScreen(){
       point of a log.</p>`)}
 
     ${q('Wishlist', `
-      <p><b>Wishlist</b> is where anyone can put ideas for either app. It's the same
-      list the contacts app shows, so an idea added here appears there too. Use the two
-      buttons at the top to switch between Calendar Club ideas and contacts ones.</p>
-      <p>Anyone signed in can add an idea and move any idea between Idea, Maybe, Doing,
-      Done and Not doing. You can only remove your own.</p>`)}
+      <p><b>Wishlist</b> is where anyone can put ideas for this app. Anyone signed in can
+      add one and move any idea between Idea, Maybe, Doing, Done and Not doing. You can
+      edit or remove your own with the buttons under it.</p>`)}
 
     ${q('If something goes wrong', `
       <p>Signed in but seeing nothing? Your email hasn't been added to the access list
@@ -1809,10 +1954,20 @@ function importScreen(){
     <div id="impplan"></div>`;
 }
 
+function wireClear(){
+  const c = document.getElementById('clearq');
+  if (c) c.onclick = () => {
+    filters.q = '';
+    render();
+    document.getElementById('q')?.focus();
+  };
+}
+
 function wireActivity(){
   const q = document.getElementById('q');
   if (q) q.oninput = () => { filters.q = q.value; render();
     const box = document.getElementById('q'); if (box){ box.focus(); box.selectionStart = box.value.length; } };
+  wireClear();
   app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
     const [gt, gid] = b.dataset.goto.split(':');
     tab = gt; openRec = {table:gt, id:Number(gid)}; editing = false; render();
@@ -2074,14 +2229,20 @@ async function applyPlan(){
 function listScreen(t){
   return `
     <div class="controls" style="margin-top:20px">
-      <input class="search" id="q" placeholder="Search ${TABLES[t].label.toLowerCase()}" value="${esc(filters.q)}">
+      ${searchBox('Search ' + TABLES[t].label.toLowerCase())}
     </div>
     <div id="list"></div>`;
 }
 
 function wireList(){
   const q = document.getElementById('q');
-  if (q) q.oninput = () => { filters.q = q.value; drawList(); };
+  if (q) q.oninput = () => {
+    const had = !!filters.q;
+    filters.q = q.value;
+    if (had !== !!filters.q) { render(); document.getElementById('q')?.focus(); }
+    else drawList();
+  };
+  wireClear();
   const st = document.getElementById('status');
   if (st) st.onchange = () => { filters.status = st.value; drawList(); };
   const so = document.getElementById('sort');
@@ -2233,12 +2394,17 @@ function plainRow(t, r){
   let meta = '';
   if (t === 'people'){
     const jobs = (D.shop_people || []).filter(l => l.person_id === r.id).length;
-    meta = [rolesOf(r).join(', '), r.area, r.phone1,
+    const roles = rolesOf(r).map(x => x === 'TM' && r.tm_code ? `TM (${r.tm_code})` : x);
+    meta = [roles.join(', '), r.area, r.phone1,
             jobs ? `${jobs} store${jobs === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
   } else if (t === 'locations'){
     meta = [nameOf('cities', r.city_id), r.postcode].filter(Boolean).join(' · ');
   } else if (t === 'store_types'){
+    const used = D.shops.filter(x => x.type_id === r.id).length;
+    const thisYear = D.shops.filter(x => x.type_id === r.id &&
+      x.operating_year === (filters.year || currentYear())).length;
     meta = [r.active === false ? 'Retired' : '',
+            `${used} store${used === 1 ? '' : 's'} ever` + (thisYear ? ` · ${thisYear} this season` : ''),
             r.builders_required ? r.builders_required + ' builders' : '',
             r.grid_pallet ? '8ft grid pallet' : '', r.specialised_tools].filter(Boolean).join(' · ');
   } else if (t === 'cities'){
@@ -2296,7 +2462,7 @@ function drawSheet(){
       ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}
       ${t === 'shops' && !openRec.id ? copyPicker() : ''}
       <form id="form" autocomplete="off">
-        ${t === 'shops' && openRec.id ? headBlock(rec, phaseOf(rec)) : ''}
+        ${t === 'shops' && openRec.id ? headBlock(rec, phaseOf(rec)) + featureShot('shops', rec) : ''}
         ${TABLES[t].fields.map(([grp, fs]) => {
           const phase = t === 'shops' && openRec.id ? phaseOf(rec) : null;
           const html = sectionHtml(t, grp, fs, rec, phase);
@@ -2339,7 +2505,8 @@ function drawSheet(){
   el.querySelector('#edit')?.addEventListener('click', () => { editing = true; drawSheet(); });
   el.querySelector('#save')?.addEventListener('click', () => save(t, rec));
   el.querySelector('#del')?.addEventListener('click', () => remove(t, rec));
-  el.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
+  el.querySelectorAll('[data-goto]').forEach(b => b.onclick = e => {
+    e.preventDefault();
     const [gt, gid] = b.dataset.goto.split(':');
     tab = gt; openRec = {table:gt, id:Number(gid)}; editing = false; render();
   });
@@ -2365,6 +2532,15 @@ function drawSheet(){
   wireCombos(el);
   el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () =>
     openPicker(b.dataset.pick, b.dataset.picklabel));
+  el.querySelectorAll('[data-planadd]').forEach(b => b.onclick = () => {
+    const inp = el.querySelector('#planfile_' + b.dataset.planadd);
+    inp.onchange = () => { if (inp.files[0])
+      uploadPlan(t, openRec.id, b.dataset.planadd, inp.files[0], b.dataset.planlabel); };
+    inp.click();
+  });
+  el.querySelectorAll('[data-planrm]').forEach(b => b.onclick = () =>
+    removePlan(t, openRec.id, b.dataset.planrm, b.dataset.planlabel));
+  fillPlans(el);
   el.querySelectorAll('[data-profile]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     makeProfile(Number(b.dataset.profile));
@@ -2373,7 +2549,7 @@ function drawSheet(){
     e.stopPropagation();
     removePhoto(Number(b.dataset.delphoto));
   });
-  el.querySelectorAll('#shots img').forEach(img => img.onclick = () => {
+  el.querySelectorAll('#shots img, .feature img').forEach(img => img.onclick = () => {
     const u = photoURL[img.dataset.path];
     if (u) window.open(u, '_blank', 'noopener');
   });
@@ -2479,7 +2655,7 @@ function closeSheet(){
 
 function fieldHtml([k, label, type], rec){
   const v = rec[k];
-  const wide = type === 'textarea' || type === 'url' ? ' wide' : '';
+  const wide = type === 'textarea' || type === 'url' || type === 'pdf' ? ' wide' : '';
   let body;
 
   if (!editing){
@@ -2499,7 +2675,19 @@ function fieldHtml([k, label, type], rec){
     else if (type === 'number') shown = v == null ? '' : v;
     else shown = v ?? '';
 
-    if (type === 'url' && v) body = `<div class="val"><a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.length > 60 ? v.slice(0,60) + '…' : v)}</a></div>`;
+    const jumpTo = type === 'tm' || type === 'ref:people' ? 'people'
+                 : type.startsWith('ref:') ? type.slice(4) : null;
+    if (jumpTo && v && TABLES[jumpTo] && shown){
+      body = `<div class="val"><button type="button" class="jump" data-goto="${jumpTo}:${v}"
+        title="Open ${esc(shown)}">${esc(shown)}<span aria-hidden="true">›</span></button></div>`;
+    }
+    else if (type === 'pdf'){
+      body = v
+        ? `<div class="val"><a class="btn plan" data-plan="${esc(v)}" target="_blank"
+             rel="noopener">📄 ${esc(planName(v))}</a></div>`
+        : '<div class="val empty">—</div>';
+    }
+    else if (type === 'url' && v) body = `<div class="val"><a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.length > 60 ? v.slice(0,60) + '…' : v)}</a></div>`;
     else if (type === 'coords' && v) body = `<div class="val">
       <a href="${esc(mapsLink(v))}" target="_blank" rel="noopener">Open in maps</a>
       <span class="rmeta" style="display:block">${esc(v)}</span></div>`;
@@ -2514,6 +2702,20 @@ function fieldHtml([k, label, type], rec){
       `<label class="rolechk"><input type="checkbox" name="roles" value="${esc(r)}"
         ${have.includes(r) ? 'checked' : ''}> ${esc(r)}</label>`).join('')}</div>`;
     return `<div class="f wide"><label>${esc(label)}</label>${body}</div>`;
+  }
+  if (type === 'pdf'){
+    return `<div class="f wide"><label>${esc(label)}</label>
+      ${v ? `<div class="planrow">
+        <a class="btn plan" data-plan="${esc(v)}" target="_blank" rel="noopener">📄 ${esc(planName(v))}</a>
+        <button type="button" class="btn" data-planrm="${k}" data-planlabel="${esc(label)}"
+          style="color:var(--accent)">Remove</button>
+      </div>` : ''}
+      <div class="planrow" style="margin-top:${v ? '8px' : '0'}">
+        <input type="file" accept="application/pdf,.pdf" id="planfile_${k}" style="display:none">
+        <button type="button" class="btn" data-planadd="${k}" data-planlabel="${esc(label)}">${
+          v ? 'Replace with a PDF' : 'Upload a PDF'}</button>
+        <span class="rmeta" id="planstatus_${k}"></span>
+      </div></div>`;
   }
   if (type === 'coords'){
     return `<div class="f"><label>${esc(label)}</label>
@@ -2756,6 +2958,7 @@ function collect(t, rec){
   const form = document.getElementById('form');
   const out = {};
   TABLES[t].fields.forEach(([, fs]) => fs.forEach(([k, , type]) => {
+    if (type === 'pdf') return;          // uploaded on its own, not typed in
     if (type === 'roles'){
       out.roles = [...form.querySelectorAll('input[name="roles"]:checked')].map(b => b.value);
       return;
