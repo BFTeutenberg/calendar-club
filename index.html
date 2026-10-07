@@ -198,12 +198,14 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 
 /* ---------- detail ---------- */
 .sheet{
-  position:fixed; inset:0; z-index:40; background:var(--paper); overflow-y:auto;
-  padding:env(safe-area-inset-top) 0 40px;
+  position:fixed; inset:0; z-index:40; background:var(--paper);
+  display:flex; flex-direction:column; padding-top:env(safe-area-inset-top);
 }
+.sheetbody{flex:1; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  padding-bottom:calc(40px + env(safe-area-inset-bottom))}
 .sheet .wrap{padding-top:14px}
 .sheetbar{
-  position:sticky; top:0; background:var(--paper); border-bottom:1px solid var(--line);
+  flex:0 0 auto; background:var(--paper); border-bottom:1px solid var(--line);
   padding:10px 16px; display:flex; gap:10px; align-items:center; z-index:2;
 }
 .sheetbar .ttl{font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
@@ -324,6 +326,7 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .combolist li{padding:9px 11px; border-radius:6px; cursor:pointer; font-size:15.5px}
 .combolist li.on, .combolist li:hover{background:var(--sink)}
 .combolist li.none{color:var(--muted); cursor:default}
+.combolist li.mknew{color:var(--accent); font-weight:600}
 .rolebox{display:flex; flex-wrap:wrap; gap:8px}
 .rolechk{display:flex; align-items:center; gap:7px; padding:7px 12px; border:1px solid var(--line);
   border-radius:20px; background:var(--card); font-size:14px; cursor:pointer}
@@ -354,6 +357,18 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .coordrow input{flex:1; min-width:0}
 .coordrow .btn{white-space:nowrap; padding:8px 12px}
 .planrow{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.viewwrap{position:fixed; inset:0; z-index:70; background:var(--paper);
+  display:flex; flex-direction:column; padding-top:env(safe-area-inset-top)}
+.viewbar{flex:0 0 auto; display:flex; gap:10px; align-items:center; padding:10px 14px;
+  border-bottom:1px solid var(--line)}
+.viewbar .ttl{flex:1; min-width:0; font-weight:600; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+.viewbar .btn{text-decoration:none; white-space:nowrap}
+.viewbody{flex:1; min-height:0; display:flex; background:var(--sink)}
+.viewbody iframe{flex:1; width:100%; border:0; background:#fff}
+.viewbody img{margin:auto; max-width:100%; max-height:100%; object-fit:contain}
+.viewhint{flex:0 0 auto; margin:0; padding:10px 14px calc(12px + env(safe-area-inset-bottom));
+  font-size:13.5px; color:var(--muted); text-align:center}
 .btn.plan{text-decoration:none; display:inline-flex; align-items:center; gap:7px;
   max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .shots{display:flex; flex-wrap:wrap; gap:10px}
@@ -469,6 +484,16 @@ function daysOpen(s){
   const a = new Date(s.opening_date), b = new Date(s.closedown_date);
   return Math.round((b - a) / 86400000) + 1;
 }
+// "88 days = 13 weeks + 3 days", which is how a build schedule is talked about.
+function daysSpelled(days){
+  if (days == null) return '';
+  const w = Math.floor(days / 7), d = days - w * 7;
+  const noun = n => n === 1 ? '' : 's';
+  if (!w) return `${days} day${noun(days)}`;
+  if (!d) return `${days} days = ${w} week${noun(w)}`;
+  return `${days} days = ${w} week${noun(w)} + ${d} day${noun(d)}`;
+}
+
 function weeksLabel(days){
   if (days == null) return '';
   const w = Math.round(days / 7), d = days - w * 7;
@@ -675,7 +700,7 @@ function render(){
     }
   });
   mn.querySelectorAll('button[data-tab]').forEach(b => b.onclick = () => {
-    tab = b.dataset.tab;
+    tab = b.dataset.tab; openRec = null; trail = [];
     filters = {...filters, q:'', status:''};
     render();
   });
@@ -718,7 +743,7 @@ function yearHead(){
       <span class="cnt"><b>${shown.length}</b>${shown.length === 1 ? 'store' : 'stores'}</span>
     </div>
     ${searchBox('Search store, city, mall or person')}
-    ${filters.year ? '<p class="yearhint">Swipe here or on a card to change season</p>' : ''}
+    ${filters.year ? '<p class="yearhint">Swipe on a card to change season</p>' : ''}
   </div>`;
 }
 
@@ -1309,9 +1334,11 @@ async function wireWishes(){
    The chosen person's id lands in a hidden field with the same id the old
    dropdown had, so everything reading it carries on working. */
 const comboOpts = {};
+const comboNew = {};        // fields that may create what you type
 
-function comboHtml(id, options, placeholder, chosenId){
+function comboHtml(id, options, placeholder, chosenId, addLabel){
   comboOpts[id] = options;
+  comboNew[id] = addLabel || null;
   const chosen = options.find(o => String(o.id) === String(chosenId));
   return `<div class="combo" data-for="${id}">
     <input type="text" class="comboin" autocomplete="off" role="combobox"
@@ -1349,10 +1376,16 @@ function wireCombos(root){
 
     const draw = () => {
       const rows = matches();
+      const typed = text.value.trim();
+      // Only offer to create when nothing matches, or a near-miss would be one
+      // tap away from a duplicate.
+      const offerNew = comboNew[key] && typed.length > 1 && !rows.length;
       marked = -1;
-      list.innerHTML = rows.length
+      list.innerHTML = (rows.length
         ? rows.map(o => `<li data-id="${o.id}">${esc(o.label)}</li>`).join('')
-        : '<li class="none">No one matches</li>';
+        : (offerNew ? '' : '<li class="none">Nothing matches</li>'))
+        + (offerNew ? `<li data-id="new:${esc(typed)}" class="mknew">+ Add “${
+            esc(typed)}” as a new ${esc(comboNew[key])}</li>` : '');
       list.hidden = false;
       text.setAttribute('aria-expanded', 'true');
       list.querySelectorAll('li[data-id]').forEach(li => li.onmousedown = e => {
@@ -1580,6 +1613,38 @@ async function removePlan(table, id, field, label){
   drawSheet();
 }
 
+/* --------------------------------------------------------------- the viewer
+   Opening a file in a new tab from an installed app gives you a window with no
+   obvious way out, so photos and PDFs open in here instead, with a Close button
+   that is always there. */
+function closeViewer(){
+  document.getElementById('viewwrap')?.remove();
+  document.removeEventListener('keydown', viewerKey);
+}
+function viewerKey(e){ if (e.key === 'Escape') closeViewer(); }
+
+function openViewer(url, name, kind){
+  closeViewer();
+  const el = document.createElement('div');
+  el.className = 'viewwrap'; el.id = 'viewwrap';
+  el.innerHTML = `
+    <div class="viewbar">
+      <button type="button" class="btn" id="viewclose">✕ Close</button>
+      <span class="ttl">${esc(name || '')}</span>
+      <a class="btn" href="${esc(url)}" target="_blank" rel="noopener">Open outside</a>
+    </div>
+    <div class="viewbody">
+      ${kind === 'pdf'
+        ? `<iframe src="${esc(url)}" title="${esc(name || 'Document')}"></iframe>`
+        : `<img src="${esc(url)}" alt="${esc(name || '')}">`}
+    </div>
+    ${kind === 'pdf' ? `<p class="viewhint">If nothing appears, tap
+      <b>Open outside</b> to view it in your usual PDF reader.</p>` : ''}`;
+  document.body.appendChild(el);
+  el.querySelector('#viewclose').onclick = closeViewer;
+  document.addEventListener('keydown', viewerKey);
+}
+
 function helpScreen(){
   const can = canEdit('shops');
   const q = (h, body) => `<section class="grp"><h3>${h}</h3>${body}</section>`;
@@ -1629,11 +1694,16 @@ function helpScreen(){
       builders it needs, the operator, who's booked, and the opening date. Once the
       store opens it switches to the operator, the dates and budget against actual.</p>
       <p>The mall, store type, city and TM on a store are buttons — tap one to open that
-      record, then Back to return.</p>
+      record, and Back brings you straight back to the store, however many you follow.</p>
+      <p>While editing, the mall, store type and city boxes narrow as you type. If what
+      you type isn't on the list yet, the box offers to add it, and it's created when you
+      save.</p>
       <p>The photo marked <b>Use as main</b> is shown large under the headline details.</p>
       <p><b>Build plan</b> and <b>Mall/shop layout</b> take a PDF each. Tap Edit, then
       Upload a PDF. They're kept privately alongside the photos, and the link expires
-      after an hour, so a file address can't be passed around.</p>
+      after an hour, so a file address can't be passed around. Photos and PDFs open
+      inside the app with a Close button; <b>Open outside</b> hands it to your usual
+      reader if you'd rather.</p>
       <p>Build, opening and closing dates carry the day of the week, since that is
       usually what you need when booking a build.</p>
       <p>The coloured pills are the readiness checks — delivery, RAMS &amp; SIPS and
@@ -1970,7 +2040,7 @@ function wireActivity(){
   wireClear();
   app.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
     const [gt, gid] = b.dataset.goto.split(':');
-    tab = gt; openRec = {table:gt, id:Number(gid)}; editing = false; render();
+    goTo(gt, Number(gid));
   });
 }
 
@@ -2450,13 +2520,15 @@ function drawSheet(){
   el.className = 'sheet'; el.id = 'sheet';
   el.innerHTML = `
     <div class="sheetbar">
-      <button class="btn" id="back">${editing ? 'Cancel' : 'Back'}</button>
+      <button class="btn" id="back">${editing ? 'Cancel'
+        : trail.length ? '‹ Back' : 'Back'}</button>
       <div class="ttl">${esc(title)}</div>
       <div class="sp">
         ${editing ? `<button class="btn primary" id="save">Save</button>`
                   : mayEdit ? `<button class="btn" id="edit">Edit</button>` : ''}
       </div>
     </div>
+    <div class="sheetbody" id="sheetbody">
     <div class="wrap">
       <h2 class="detail">${t === 'people' && openRec.id ? avatar('people', rec.id, true) + ' ' : ''}${esc(title)}</h2>
       ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}
@@ -2472,8 +2544,8 @@ function drawSheet(){
           return html;
         }).join('')}
         ${openRec.id && ['shops','people','locations'].includes(t) ? photosBlock(t, rec) : ''}
-        ${openRec.id ? activityBlock(t, openRec.id) : ''}
         ${t === 'shops' && openRec.id ? peopleBlock(rec) : ''}
+        ${openRec.id ? activityBlock(t, openRec.id) : ''}
         ${t === 'people' && openRec.id ? storesBlock(rec) : ''}
       </form>
       ${(() => {
@@ -2492,23 +2564,27 @@ function drawSheet(){
            <b>Still in use</b> to No to keep it out of the dropdown while leaving it
            on the stores that already have it.</p>` : ''}
       <div class="err" id="err"></div>
-    </div>`;
+    </div></div>`;
 
   // Redrawing replaces the whole sheet, so put the reader back where they were.
   const old = document.getElementById('sheet');
-  const wasAt = old ? old.scrollTop : 0;
+  const oldBody = old ? old.querySelector('.sheetbody') : null;
+  const wasAt = oldBody ? oldBody.scrollTop : (old ? old.scrollTop : 0);
   old?.remove();
   document.body.appendChild(el);
-  if (wasAt) el.scrollTop = wasAt;
+  if (wasAt){
+    const body = el.querySelector('.sheetbody');
+    if (body) body.scrollTop = wasAt;
+  }
 
-  el.querySelector('#back').onclick = () => { editing ? (editing = false, drawSheet()) : closeSheet(); };
+  el.querySelector('#back').onclick = goBack;
   el.querySelector('#edit')?.addEventListener('click', () => { editing = true; drawSheet(); });
   el.querySelector('#save')?.addEventListener('click', () => save(t, rec));
   el.querySelector('#del')?.addEventListener('click', () => remove(t, rec));
   el.querySelectorAll('[data-goto]').forEach(b => b.onclick = e => {
     e.preventDefault();
     const [gt, gid] = b.dataset.goto.split(':');
-    tab = gt; openRec = {table:gt, id:Number(gid)}; editing = false; render();
+    goTo(gt, Number(gid));
   });
   el.querySelectorAll('[data-unlink]').forEach(b => b.onclick = async e => {
     e.stopPropagation();
@@ -2540,6 +2616,12 @@ function drawSheet(){
   });
   el.querySelectorAll('[data-planrm]').forEach(b => b.onclick = () =>
     removePlan(t, openRec.id, b.dataset.planrm, b.dataset.planlabel));
+  el.querySelectorAll('a[data-plan]').forEach(a => a.onclick = async e => {
+    e.preventDefault();
+    const u = a.getAttribute('href') || await planLink(a.dataset.plan);
+    if (u) openViewer(u, planName(a.dataset.plan), 'pdf');
+    else toast('Could not open that file');
+  });
   fillPlans(el);
   el.querySelectorAll('[data-profile]').forEach(b => b.onclick = e => {
     e.stopPropagation();
@@ -2551,7 +2633,7 @@ function drawSheet(){
   });
   el.querySelectorAll('#shots img, .feature img').forEach(img => img.onclick = () => {
     const u = photoURL[img.dataset.path];
-    if (u) window.open(u, '_blank', 'noopener');
+    if (u) openViewer(u, img.alt || 'Photo', 'image');
   });
   const ap = el.querySelector('#addphoto');
   if (ap){
@@ -2572,6 +2654,20 @@ function drawSheet(){
 }
 
 let copyFrom = null;   // the store a new one is being based on
+let trail = [];        // records opened on the way here, newest last
+
+// Follow a link from one record to another, remembering where you came from.
+function goTo(table, id){
+  if (openRec && openRec.id) trail.push({...openRec, tab});
+  tab = table; openRec = {table, id}; editing = false; render();
+}
+
+function goBack(){
+  if (editing){ editing = false; drawSheet(); return; }
+  const from = trail.pop();
+  if (from){ tab = from.tab || from.table; openRec = {table:from.table, id:from.id}; render(); return; }
+  closeSheet();
+}
 
 // The most recent run of each store, which is what a new season is copied from.
 function previousStores(){
@@ -2648,7 +2744,7 @@ function usedSummary(used){
 }
 
 function closeSheet(){
-  openRec = null; editing = false;
+  openRec = null; editing = false; trail = [];
   document.getElementById('sheet')?.remove();
   drawList();     // photos or links may have changed while it was open
 }
@@ -2740,6 +2836,16 @@ function fieldHtml([k, label, type], rec){
   if (type === 'ref:people'){
     body = comboHtml('fld_' + k, [...D.people].sort((a,b) => a.name.localeCompare(b.name))
       .map(p => ({id:p.id, label:p.name})), 'Start typing a name…', v);
+    return `<div class="f"><label>${esc(label)}</label>${body}</div>`;
+  }
+  if (type === 'ref:locations' || type === 'ref:store_types' || type === 'ref:cities'){
+    const src = type.slice(4);
+    const word = {locations:'mall', store_types:'store type', cities:'city'}[src];
+    body = comboHtml('fld_' + k,
+      [...D[src]].filter(o => o.active !== false || o.id === v)
+        .sort((a,b) => a.name.localeCompare(b.name))
+        .map(o => ({id:o.id, label:o.name + (o.active === false ? ' (retired)' : '')})),
+      'Start typing, or type a new one…', v, word);
     return `<div class="f"><label>${esc(label)}</label>${body}</div>`;
   }
   if (type.startsWith('ref:')){
@@ -2857,7 +2963,7 @@ function moneyTable(s){
       ${v == null ? '' : `<div class="f"><label>Variation on budget</label><div class="val">${
         (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1)}%</div></div>`}
       ${s.pct_two_plus == null ? '' : `<div class="f"><label>Two plus</label><div class="val">${s.pct_two_plus}%</div></div>`}
-      ${days == null ? '' : `<div class="f"><label>Days open</label><div class="val">${days} · ${esc(weeksLabel(days))}</div></div>`}
+      ${days == null ? '' : `<div class="f"><label>Days open</label><div class="val">${esc(daysSpelled(days))}</div></div>`}
     </div>`;
 }
 
@@ -2967,12 +3073,32 @@ function collect(t, rec){
     if (!el) return;
     let v = el.value;
     if (v === '') { out[k] = null; return; }
-    if (type === 'tm' || type.startsWith('ref:')) out[k] = Number(v);
+    if (type === 'tm' || type.startsWith('ref:')){
+      out[k] = /^new:/.test(v) ? v : Number(v);
+    }
     else if (type === 'bool') out[k] = v === 'true';
     else if (type === 'money' || type === 'number') out[k] = Number(v);
     else out[k] = v;
   }));
   return out;
+}
+
+// A field may hold "new:Westfield" — make that record, then point at it.
+async function resolveNew(patch){
+  const where = {city_id:'cities', location_id:'locations', type_id:'store_types'};
+  for (const [field, table] of Object.entries(where)){
+    const v = patch[field];
+    if (typeof v !== 'string' || !/^new:/.test(v)) continue;
+    const name = v.slice(4).trim();
+    const had = D[table].find(r => key(r.name) === key(name));
+    if (had){ patch[field] = had.id; continue; }
+    const {data, error} = await db.from(TBL[table]).insert({name}).select().single();
+    if (error) throw new Error(`Could not add the ${table === 'cities' ? 'city'
+      : table === 'locations' ? 'mall' : 'store type'} "${name}": ${error.message}`);
+    D[table].push(data);
+    logIt('added', table, data.id, null);
+    patch[field] = data.id;
+  }
 }
 
 async function save(t, rec){
@@ -2986,6 +3112,7 @@ async function save(t, rec){
   }
   document.getElementById('save').disabled = true;
   try {
+    await resolveNew(patch);
     if (openRec.id){
       const {data, error} = await db.from(TBL[t]).update(patch).eq('id', openRec.id).select().single();
       if (error) throw error;
