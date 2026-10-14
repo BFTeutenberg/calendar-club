@@ -210,12 +210,13 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 }
 .sheetbar .ttl{font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .sheetbar .sp{margin-left:auto; display:flex; gap:8px}
-.seasonnav{display:flex; gap:8px; align-items:center; margin:0 0 16px; flex-wrap:wrap}
+.seasonnav{display:flex; gap:6px; align-items:center; margin:0 0 16px}
 .seasonnav select{
-  flex:1 1 150px; min-width:0; padding:9px 11px; border:1px solid var(--line);
+  flex:1 1 auto; min-width:0; padding:9px 8px; border:1px solid var(--line);
   border-radius:8px; background:var(--card); font-weight:600;
 }
-.navarrow{padding:9px 14px; font-size:17px; line-height:1}
+.seasonnav .btn{flex:0 0 auto; white-space:nowrap}
+.navarrow{padding:9px 12px; font-size:17px; line-height:1}
 .navarrow:disabled{opacity:.35}
 h2.detail{font-size:26px; letter-spacing:-0.025em; margin:16px 0 2px}
 .sub{color:var(--muted); margin-bottom:18px}
@@ -1785,7 +1786,6 @@ const FIG_COLS = [
   ['Type',        s => nameOf('store_types', s.type_id),              'txt'],
   ['Operator',    s => peopleOn(s.id).filter(p => p.role === 'Operator')
                          .map(p => p.name).join(' & '),               'txt'],
-  ['Status',      s => s.store_status || '',                          'txt'],
   ['Build',       s => ukDate(s.build_date),                          'txt'],
   ['Open',        s => ukDate(s.opening_date),                        'txt'],
   ['Close',       s => ukDate(s.closedown_date),                      'txt'],
@@ -2016,9 +2016,9 @@ function helpScreen(){
       <p>A store that has only run once says so instead.</p>`)}
 
     ${q('Figures', `
-      <p><b>Figures</b> beside the season picker opens a wide table of every number for
-      that store, a row per season: dates, days open, budget and actual, the difference
-      and variation, dated and gift, and commission. Scroll sideways for the rest of the
+      <p><b>Figures</b> at the right of the season row opens a wide table of every number
+      for that store, a row per season: dates, days open, budget and actual, the
+      difference and variation, dated and gift, and commission. Scroll sideways for the rest of the
       columns; the season column stays put. The bottom line totals the ones worth
       totalling.</p>
       <p><b>All stores in a season</b> switches it to every store in one year, and
@@ -3211,7 +3211,8 @@ function headBlock(s, phase){
       dateItem('Opened', s.opening_date),
       dateItem(phase === 'closed' ? 'Closed' : 'Closes', s.closedown_date,
                phase === 'trading' ? whenLabel(s.closedown_date) : ''),
-      item('Budget', money(s.budget)),
+      item('Budget', money(s.budget), s.commission_pct == null ? ''
+           : `at ${s.commission_pct}% = ${money(budgetAmt(s))}`),
       item('Actual', money(s.actual), variation(s) == null ? '' :
         (variation(s) >= 0 ? '+' : '−') + Math.abs(variation(s)).toFixed(1) + '% on budget'),
     ];
