@@ -210,6 +210,13 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 }
 .sheetbar .ttl{font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .sheetbar .sp{margin-left:auto; display:flex; gap:8px}
+.seasonnav{display:flex; gap:8px; align-items:center; margin:0 0 16px; flex-wrap:wrap}
+.seasonnav select{
+  flex:1 1 150px; min-width:0; padding:9px 11px; border:1px solid var(--line);
+  border-radius:8px; background:var(--card); font-weight:600;
+}
+.navarrow{padding:9px 14px; font-size:17px; line-height:1}
+.navarrow:disabled{opacity:.35}
 h2.detail{font-size:26px; letter-spacing:-0.025em; margin:16px 0 2px}
 .sub{color:var(--muted); margin-bottom:18px}
 section.grp{
@@ -369,6 +376,44 @@ table.money-t td.none{color:var(--muted); font-weight:400; font-size:15px}
 .viewbody img{margin:auto; max-width:100%; max-height:100%; object-fit:contain}
 .viewhint{flex:0 0 auto; margin:0; padding:10px 14px calc(12px + env(safe-area-inset-bottom));
   font-size:13.5px; color:var(--muted); text-align:center}
+
+/* the figures table */
+.figwrap{position:fixed; inset:0; z-index:65; background:var(--paper);
+  display:flex; flex-direction:column; padding-top:env(safe-area-inset-top)}
+.figbar{flex:0 0 auto; display:flex; gap:10px; align-items:center; padding:10px 14px;
+  border-bottom:1px solid var(--line)}
+.figbar .ttl{flex:1; min-width:0; font-weight:700; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap}
+.figtabs{flex:0 0 auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  padding:10px 14px 4px}
+.figtabs select{padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+  background:var(--card)}
+.figbody{flex:1; min-height:0; overflow:auto; -webkit-overflow-scrolling:touch; padding:10px 14px}
+.figtable{border-collapse:separate; border-spacing:0; font-size:14.5px; white-space:nowrap}
+.figtable th, .figtable td{padding:9px 12px; border-bottom:1px solid var(--line)}
+.figtable th{
+  position:sticky; top:0; z-index:2; background:var(--paper); text-align:left;
+  font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--muted); border-bottom:1px solid var(--ink);
+}
+/* the first column stays put while the rest scrolls past */
+.figtable th:first-child, .figtable td:first-child{
+  position:sticky; left:0; background:var(--paper); z-index:1; font-weight:600;
+}
+.figtable th:first-child{z-index:3}
+.figtable .num{text-align:right; font-variant-numeric:tabular-nums}
+.figtable td.none{color:var(--muted); text-align:right}
+.figtable tbody tr{cursor:pointer}
+.figtable tbody tr:hover td{background:var(--sink)}
+.figtable tbody tr:hover td:first-child{background:var(--sink)}
+.figtable td.pos{color:var(--live); font-weight:600}
+.figtable td.neg{color:var(--accent); font-weight:600}
+.figtable tfoot td{
+  border-top:2px solid var(--ink); border-bottom:0; font-weight:700;
+  background:var(--paper); position:sticky; bottom:0;
+}
+.fighint{flex:0 0 auto; margin:0; padding:8px 14px calc(12px + env(safe-area-inset-bottom));
+  font-size:13px; color:var(--muted); text-align:center}
 .btn.plan{text-decoration:none; display:inline-flex; align-items:center; gap:7px;
   max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .shots{display:flex; flex-wrap:wrap; gap:10px}
@@ -667,6 +712,7 @@ function render(){
             `<button aria-selected="${k===tab}" data-tab="${k}">${v.label}</button>`).join('')}
           ${canEdit('shops') ? `<button aria-selected="${tab==='import'}"
             data-tab="import">Import</button>` : ''}
+          <button data-figures="1">Figures</button>
           <button aria-selected="${tab==='activity'}" data-tab="activity">Activity</button>
           <button aria-selected="${tab==='wishes'}" data-tab="wishes">Wishlist</button>
           <button aria-selected="${tab==='help'}" data-tab="help">Help</button>
@@ -699,6 +745,10 @@ function render(){
       mn.classList.remove('on'); mb.setAttribute('aria-expanded', false);
     }
   });
+  mn.querySelector('[data-figures]').onclick = () => {
+    mn.classList.remove('on'); mb.setAttribute('aria-expanded', false);
+    openFigures(null, filters.year || currentYear());
+  };
   mn.querySelectorAll('button[data-tab]').forEach(b => b.onclick = () => {
     tab = b.dataset.tab; openRec = null; trail = [];
     filters = {...filters, q:'', status:''};
@@ -1645,6 +1695,244 @@ function openViewer(url, name, kind){
   document.addEventListener('keydown', viewerKey);
 }
 
+/* ------------------------------------------------- one store, across the years
+   Names drift between seasons, so the chain is built a season at a time from
+   whichever record matched last, and a year the store didn't run doesn't break
+   it. */
+function storeHistory(shop){
+  const years = seasonList();
+  const found = new Map([[shop.operating_year, shop]]);
+  const here = years.indexOf(shop.operating_year);
+  let back = shop;
+  for (let j = here - 1; j >= 0; j--){
+    const hit = sameStoreIn(back, years[j]);
+    if (hit){ found.set(years[j], hit); back = hit; }
+  }
+  let fwd = shop;
+  for (let j = here + 1; j < years.length; j++){
+    const hit = sameStoreIn(fwd, years[j]);
+    if (hit){ found.set(years[j], hit); fwd = hit; }
+  }
+  return years.filter(y => found.has(y)).map(y => found.get(y));
+}
+
+function seasonNav(rec){
+  const line = storeHistory(rec);
+  const many = line.length > 1;
+  const at = line.findIndex(s => s.id === rec.id);
+  return `<div class="seasonnav">
+    ${many ? `<button type="button" class="btn navarrow" id="prevyear" ${
+      line[at - 1] ? '' : 'disabled'} aria-label="Earlier season">‹</button>
+    <select id="storyear" aria-label="Season">
+      ${line.map(s => `<option value="${s.id}" ${s.id === rec.id ? 'selected' : ''}>${
+        esc(s.operating_year)}${key(s.name) === key(rec.name) ? '' : ' · ' + esc(s.name)}</option>`).join('')}
+    </select>
+    <button type="button" class="btn navarrow" id="nextyear" ${
+      line[at + 1] ? '' : 'disabled'} aria-label="Later season">›</button>`
+    : `<span class="rmeta" style="flex:1">Only season: ${esc(rec.operating_year)}</span>`}
+    <button type="button" class="btn" id="figuresbtn">Figures</button>
+  </div>`;
+}
+
+// Move to the same store in another season without losing the trail behind us.
+function showStore(id){
+  if (!id) return;
+  openRec = {table:'shops', id:Number(id)};
+  editing = false;
+  const s = D.shops.find(x => x.id === Number(id));
+  if (s){ filters.year = s.operating_year; lastSeason = s.operating_year; hereStore = s.id; }
+  drawSheet();
+  if (s) toast(s.operating_year);
+}
+
+function stepStore(dir){
+  const rec = D.shops.find(x => x.id === openRec.id);
+  if (!rec) return;
+  const line = storeHistory(rec);
+  const at = line.findIndex(s => s.id === rec.id);
+  const to = line[at + dir];
+  if (!to){ toast(dir > 0 ? 'No later season for this store' : 'No earlier season'); return; }
+  showStore(to.id);
+}
+
+function wireSheetSwipe(body){
+  if (swipeWired.has(body)) return;
+  swipeWired.add(body);
+  let x0 = 0, y0 = 0, live = false;
+  body.addEventListener('touchstart', e => {
+    live = e.touches.length === 1 && !e.target.closest('input, select, textarea, a, .mapwrap, .feature, .shots');
+    if (live){ x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }
+  }, {passive:true});
+  body.addEventListener('touchend', e => {
+    if (!live) return;
+    live = false;
+    if (editing || !openRec || openRec.table !== 'shops' || !openRec.id) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0, dy = t.clientY - y0;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+    stepStore(dx < 0 ? -1 : 1);
+  }, {passive:true});
+}
+
+/* --------------------------------------------------------------- the figures
+   Every number for a store across the years, or every store in one season,
+   laid out as a wide table you scroll sideways. */
+let figMode = 'store', figStoreId = null, figYear = '';
+
+const FIG_COLS = [
+  ['Season',      s => s.operating_year,                              'txt'],
+  ['Store',       s => s.name,                                        'txt'],
+  ['Type',        s => nameOf('store_types', s.type_id),              'txt'],
+  ['Operator',    s => peopleOn(s.id).filter(p => p.role === 'Operator')
+                         .map(p => p.name).join(' & '),               'txt'],
+  ['Status',      s => s.store_status || '',                          'txt'],
+  ['Build',       s => ukDate(s.build_date),                          'txt'],
+  ['Open',        s => ukDate(s.opening_date),                        'txt'],
+  ['Close',       s => ukDate(s.closedown_date),                      'txt'],
+  ['Days',        s => daysOpen(s),                                   'int'],
+  ['Budget',      s => s.budget,                                      'cash'],
+  ['Actual',      s => s.actual,                                      'cash'],
+  ['Difference',  s => difference(s),                                 'cash±'],
+  ['Variation',   s => variation(s),                                  'pct'],
+  ['Dated bdgt',  s => s.dated_budget,                                'cash'],
+  ['Dated actl',  s => s.dated_actual,                                'cash'],
+  ['Gift bdgt',   s => s.gift_budget,                                 'cash'],
+  ['Gift actl',   s => s.gift_actual,                                 'cash'],
+  ['Comm %',      s => s.commission_pct,                              'pct'],
+  ['Comm bdgt',   s => budgetAmt(s),                                  'cash'],
+  ['Comm actl',   s => actualAmt(s),                                  'cash'],
+];
+
+const figCell = (v, kind) => {
+  if (v == null || v === '') return '<td class="none">—</td>';
+  if (kind === 'cash')  return `<td class="num">${money(v)}</td>`;
+  if (kind === 'cash±') return `<td class="num ${v >= 0 ? 'pos' : 'neg'}">${
+    (v >= 0 ? '+' : '−') + money(Math.abs(v))}</td>`;
+  if (kind === 'pct')   return `<td class="num">${Number(v).toFixed(1)}%</td>`;
+  if (kind === 'int')   return `<td class="num">${v}</td>`;
+  return `<td>${esc(v)}</td>`;
+};
+
+function figRows(){
+  if (figMode === 'store'){
+    const rec = D.shops.find(s => s.id === figStoreId);
+    return rec ? storeHistory(rec) : [];
+  }
+  return D.shops.filter(s => s.operating_year === figYear)
+    .sort((a,b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+// Only the columns that add up: a total commission percentage would be nonsense.
+const FIG_TOTALS = new Set(['Days','Budget','Actual','Difference',
+                            'Dated bdgt','Dated actl','Gift bdgt','Gift actl',
+                            'Comm bdgt','Comm actl']);
+
+function figTotals(rows){
+  return FIG_COLS.map(([label, get, kind]) => {
+    if (!FIG_TOTALS.has(label)) return ['', kind];
+    let sum = null;
+    rows.forEach(s => { const v = get(s); if (v != null && v !== '')
+      sum = (sum || 0) + Number(v); });
+    return [sum, kind];
+  });
+}
+
+function figuresCsv(rows){
+  const esc2 = v => {
+    const t = v == null ? '' : String(v);
+    return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  const lines = [FIG_COLS.map(c => esc2(c[0])).join(',')];
+  rows.forEach(s => lines.push(FIG_COLS.map(([, get]) => {
+    const v = get(s);
+    return esc2(typeof v === 'number' ? Math.round(v * 100) / 100 : v);
+  }).join(',')));
+  return lines.join('\n');
+}
+
+function openFigures(storeId, year){
+  figMode = storeId ? 'store' : 'season';
+  figStoreId = storeId || null;
+  figYear = year || filters.year || currentYear();
+  drawFigures();
+}
+
+function closeFigures(){
+  document.getElementById('figwrap')?.remove();
+  document.removeEventListener('keydown', figKey);
+}
+function figKey(e){ if (e.key === 'Escape') closeFigures(); }
+
+function drawFigures(){
+  const rows = figRows();
+  const totals = figTotals(rows);
+  const rec = figMode === 'store' ? D.shops.find(s => s.id === figStoreId) : null;
+  const heading = figMode === 'store'
+    ? (rec ? rec.name : 'Store') + ' — year by year'
+    : figYear + ' — every store';
+
+  const el = document.getElementById('figwrap') || document.createElement('div');
+  el.className = 'figwrap'; el.id = 'figwrap';
+  el.innerHTML = `
+    <div class="figbar">
+      <button type="button" class="btn" id="figclose">✕ Close</button>
+      <span class="ttl">${esc(heading)}</span>
+      <button type="button" class="btn" id="figcsv">Download</button>
+    </div>
+    <div class="figtabs">
+      ${rec ? `<button type="button" class="btn ${figMode === 'store' ? 'primary' : ''}"
+        id="figbystore">This store by year</button>` : ''}
+      <button type="button" class="btn ${figMode === 'season' ? 'primary' : ''}"
+        id="figbyseason">All stores in a season</button>
+      ${figMode === 'season' ? `<select id="figyear">${seasonList().slice().reverse()
+        .map(y => `<option ${y === figYear ? 'selected' : ''}>${esc(y)}</option>`).join('')}</select>` : ''}
+    </div>
+    <div class="figbody">
+      ${!rows.length ? '<div class="empty-state">Nothing to show.</div>' : `
+      <table class="figtable">
+        <thead><tr>${FIG_COLS.map(([label, , kind]) =>
+          `<th class="${kind === 'txt' ? '' : 'num'}">${esc(label)}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map(s => `<tr data-shop="${s.id}">${
+            FIG_COLS.map(([, get, kind]) => figCell(get(s), kind)).join('')}</tr>`).join('')}
+        </tbody>
+        <tfoot><tr>${totals.map(([v, kind], i) =>
+          i === 0 ? `<td><b>${rows.length} ${rows.length === 1 ? 'season' : 'rows'}</b></td>`
+          : v === '' ? '<td></td>' : figCell(v, kind)).join('')}</tr></tfoot>
+      </table>`}
+    </div>
+    <p class="fighint">Scroll sideways for the rest of the columns. Tap a row to open
+      that store.</p>`;
+
+  if (!el.parentNode) document.body.appendChild(el);
+  el.querySelector('#figclose').onclick = closeFigures;
+  el.querySelector('#figcsv').onclick = () => {
+    const name = (figMode === 'store' ? (rec ? rec.name : 'store') : figYear)
+      .replace(/[^A-Za-z0-9]+/g, '-');
+    const blob = new Blob([figuresCsv(rows)], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `calendar-club-${name}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  el.querySelector('#figbystore')?.addEventListener('click', () => {
+    figMode = 'store'; drawFigures();
+  });
+  el.querySelector('#figbyseason')?.addEventListener('click', () => {
+    figMode = 'season'; drawFigures();
+  });
+  const fy = el.querySelector('#figyear');
+  if (fy) fy.onchange = () => { figYear = fy.value; drawFigures(); };
+  el.querySelectorAll('tbody tr[data-shop]').forEach(tr => tr.onclick = () => {
+    const id = Number(tr.dataset.shop);
+    closeFigures();
+    if (openRec && openRec.table === 'shops') showStore(id);
+    else { tab = 'shops'; openRec = {table:'shops', id}; editing = false; render(); }
+  });
+  document.addEventListener('keydown', figKey);
+}
+
 function helpScreen(){
   const can = canEdit('shops');
   const q = (h, body) => `<section class="grp"><h3>${h}</h3>${body}</section>`;
@@ -1719,6 +2007,23 @@ function helpScreen(){
       store they've run.</p>
       <p>Those details live on the person, not the store, so correcting a number once
       fixes it everywhere.</p>`)}
+
+    ${q('One store across the years', `
+      <p>Under the title of a store there's a season picker with ‹ and › either side.
+      It follows the same store back and forward through the seasons, even where the
+      name has drifted — the dropdown shows the other name beside the year when it
+      differs. You can also swipe the store page sideways to do the same.</p>
+      <p>A store that has only run once says so instead.</p>`)}
+
+    ${q('Figures', `
+      <p><b>Figures</b> beside the season picker opens a wide table of every number for
+      that store, a row per season: dates, days open, budget and actual, the difference
+      and variation, dated and gift, and commission. Scroll sideways for the rest of the
+      columns; the season column stays put. The bottom line totals the ones worth
+      totalling.</p>
+      <p><b>All stores in a season</b> switches it to every store in one year, and
+      <b>Figures</b> in the menu opens straight to that. Tapping a row opens that
+      store, and <b>Download</b> saves what you're looking at as a spreadsheet file.</p>`)}
 
     ${q('The money', `
       <p>Budget, actual and the difference, for sales, dated, gift and commission.
@@ -2532,6 +2837,7 @@ function drawSheet(){
     <div class="wrap">
       <h2 class="detail">${t === 'people' && openRec.id ? avatar('people', rec.id, true) + ' ' : ''}${esc(title)}</h2>
       ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}
+      ${t === 'shops' && openRec.id && !editing ? seasonNav(rec) : ''}
       ${t === 'shops' && !openRec.id ? copyPicker() : ''}
       <form id="form" autocomplete="off">
         ${t === 'shops' && openRec.id ? headBlock(rec, phaseOf(rec)) + featureShot('shops', rec) : ''}
@@ -2606,6 +2912,13 @@ function drawSheet(){
       logIt(how, t, openRec.id, (who || '').trim() || null);
     }));
   wireCombos(el);
+  const sbody = el.querySelector('.sheetbody');
+  if (sbody) wireSheetSwipe(sbody);
+  const sy = el.querySelector('#storyear');
+  if (sy) sy.onchange = () => showStore(sy.value);
+  el.querySelector('#prevyear')?.addEventListener('click', () => stepStore(-1));
+  el.querySelector('#nextyear')?.addEventListener('click', () => stepStore(1));
+  el.querySelector('#figuresbtn')?.addEventListener('click', () => openFigures(openRec.id));
   el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () =>
     openPicker(b.dataset.pick, b.dataset.picklabel));
   el.querySelectorAll('[data-planadd]').forEach(b => b.onclick = () => {
