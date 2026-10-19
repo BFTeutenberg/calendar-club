@@ -191,9 +191,13 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 .g-build .gicon,.gicon.g-build{background:color-mix(in srgb,var(--amber) 18%,transparent); color:var(--amber)}
 .g-trading .gicon,.gicon.g-trading{background:color-mix(in srgb,var(--live) 15%,transparent); color:var(--live)}
 .g-inactive .gicon,.gicon.g-inactive{background:var(--sink); color:var(--muted)}
-.grphead{display:flex; align-items:center; gap:9px; font-size:15px; margin:14px 0 2px}
+/* a solid red band, the same red in light and dark so the white text always reads */
+.grphead{display:flex; align-items:center; gap:9px; font-size:16px; font-weight:800;
+  margin:18px 0 4px; padding:8px 12px; border-radius:8px; background:#A81B2E; color:#fff;
+  letter-spacing:0.01em}
 .grphead:first-child{margin-top:0}
-.grphead small{margin-left:auto; font-size:13px; font-weight:500; color:var(--muted)}
+.grphead small{margin-left:auto; font-size:14px; font-weight:700; color:#fff}
+.grphead .gicon{background:rgba(255,255,255,.22) !important; color:#fff !important}
 .rmeta{font-size:13.5px; color:var(--muted); margin-top:2px}
 .rfoot{display:flex; gap:14px; align-items:center; margin-top:9px; font-size:13px; flex-wrap:wrap}
 .tag{font-size:12px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--sink); color:var(--muted)}
@@ -502,17 +506,25 @@ let myRole = null;             // admin, editor or viewer
 let tab = 'shops';
 let filters = { q:'', year:'', status:'', tm:'', sort:'build' };
 
-const SORTS = {build:'Build date', tm:'TM', name:'Store name', status:'Status'};
-const STATUS_RANK = ['Open and Trading','Active','Pending','Reserve'];
+// Status no longer has its own order: the groups on the default order already split
+// the stores by status, and the status dropdown filters by it.
+const SORTS = {build:'Build date', open:'Opening date', name:'Store name',
+               number:'Store number', tm:'TM', city:'City'};
 
 function sortShops(list){
   const byName = (a,b) => (a.name || '').localeCompare(b.name || '');
   const byBuild = (a,b) => (a.build_date || '9999').localeCompare(b.build_date || '9999');
-  const rank = s => { const i = STATUS_RANK.indexOf(s.store_status); return i < 0 ? 99 : i; };
+  const byOpen = (a,b) => (a.opening_date || '9999').localeCompare(b.opening_date || '9999');
+  // Store numbers are text; compare them as numbers so 99 comes before 123. No number goes last.
+  const byNum = (a,b) => (a.store_number ? 0 : 1) - (b.store_number ? 0 : 1) ||
+    String(a.store_number || '').localeCompare(String(b.store_number || ''), 'en', {numeric:true});
   const tmName = s => nameOf('people', s.tm_id) || 'zzzz';
+  const city = s => nameOf('cities', s.city_id) || 'zzzz';
   if (filters.sort === 'tm')     return list.sort((a,b) => tmName(a).localeCompare(tmName(b)) || byBuild(a,b) || byName(a,b));
   if (filters.sort === 'name')   return list.sort((a,b) => byName(a,b) || byBuild(a,b));
-  if (filters.sort === 'status') return list.sort((a,b) => rank(a) - rank(b) || byBuild(a,b) || byName(a,b));
+  if (filters.sort === 'open')   return list.sort((a,b) => byOpen(a,b) || byName(a,b));
+  if (filters.sort === 'number') return list.sort((a,b) => byNum(a,b) || byName(a,b));
+  if (filters.sort === 'city')   return list.sort((a,b) => city(a).localeCompare(city(b)) || byName(a,b));
   // Build date: Yet To Build first (from yesterday's build onwards, soonest first,
   // then no build date yet), then Trading A to Z, then Inactive A to Z.
   const order = s => GROUP_ORDER.indexOf(shopGroup(s)) * 2 +
@@ -540,6 +552,34 @@ function shopGroup(s){
   if (s.closedown_date && s.closedown_date < isoDay(0)) return 'inactive';
   if (!s.build_date || s.build_date >= isoDay(-1)) return 'build';
   return 'trading';
+}
+
+/* The status a store should have from its dates, or null to leave it alone.
+   A build date makes it Active; reaching the opening date makes it Open and Trading.
+   A store with no build date that is still Pending or Reserve isn't confirmed, so it
+   is left as it is, and nothing ever moves a store back down. */
+function autoStatus(s){
+  const st = s.store_status;
+  if (st === 'Open and Trading') return null;
+  if (!s.build_date && st !== 'Active') return null;
+  if (s.opening_date && s.opening_date <= isoDay(0)) return 'Open and Trading';
+  if (s.build_date && st !== 'Active') return 'Active';
+  return null;
+}
+
+// Each time the app opens, catch up stores whose opening date has come round since.
+// Everyone sees the right status; only someone who can edit saves it.
+async function catchUpStatus(){
+  const due = {};
+  D.shops.forEach(s => {
+    const st = autoStatus(s);
+    if (st){ s.store_status = st; (due[st] = due[st] || []).push(s.id); }
+  });
+  if (!canEdit('shops')) return;
+  for (const [st, ids] of Object.entries(due)){
+    const {error} = await db.from(TBL.shops).update({store_status: st}).in('id', ids);
+    if (error) console.warn('Could not update store status', error.message);
+  }
 }
 
 
@@ -867,13 +907,15 @@ function shopsScreen(){
   const bud = inYear.reduce((t,s) => t + (s.budget || 0), 0);
   const act = inYear.reduce((t,s) => t + (s.actual || 0), 0);
   const diff = act - bud;
+  // Before any takings are in, a difference would just be the budget with a minus sign
+  const hasActual = inYear.some(s => s.actual != null);
 
   return `
     <div class="season">
       <div class="stat start"><b>${money(bud)}</b><span>budget</span></div>
-      <div class="stat mid"><b class="${diff >= 0 ? 'up' : 'down'}">${
+      ${hasActual ? `<div class="stat mid"><b class="${diff >= 0 ? 'up' : 'down'}">${
         diff >= 0 ? '+' : '−'}${money(Math.abs(diff))}</b><span>difference</span></div>
-      <div class="stat end"><b>${money(act)}</b><span>actual</span></div>
+      <div class="stat end"><b>${money(act)}</b><span>actual</span></div>` : ''}
     </div>
     <div class="controls pair">
       <select class="filter" id="sort">
@@ -2015,13 +2057,17 @@ function helpScreen(){
       <p>Each time the app opens it asks <b>whose stores</b> to show: one TM's, or
       All stores. Your last choice is outlined. The <b>area</b> dropdown on the Stores
       screen changes it at any time, and the choice is remembered on that device.</p>
-      <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
+      <p>The <b>sort</b> dropdown orders by build date, opening date, store name, store
+      number, TM or city. To see only one status, use the status dropdown beside it. Build
       date is the default, in three groups with a heading each. <b>Yet To Build</b> (?)
       comes first, from yesterday's build onwards, then stores with no build date yet.
       <b>Trading</b> (✓) is next, A to Z. <b>Inactive</b> (✕) is last, A to Z: stores that
       are Pending or Reserve, or past their closedown date. The same icon sits in the
       top right of every card, whichever order you choose. Tick <b>Default</b> beside it to open on a different order
       next time.</p>
+      <p>The <b>status looks after itself</b>. Saving a store with a build date makes it
+      Active, and on its opening date it becomes Open and Trading. A store that is still
+      Pending or Reserve with no build date is left alone, and a status never moves back down.</p>
       <p>The <b>season at the top is a dropdown</b> — tap it to jump straight to any
       year, which is the way to do it on a laptop.</p>
       <p>On a phone, <b>swipe sideways</b> — on a store card or on the pinned season at
@@ -3510,6 +3556,10 @@ async function save(t, rec){
   document.getElementById('save').disabled = true;
   try {
     await resolveNew(patch);
+    if (t === 'shops'){
+      const st = autoStatus({...rec, ...patch});
+      if (st) patch.store_status = st;
+    }
     if (openRec.id){
       const {data, error} = await db.from(TBL[t]).update(patch).eq('id', openRec.id).select().single();
       if (error) throw error;
@@ -3643,6 +3693,7 @@ async function start(){
       document.getElementById('out2').onclick = async () => { await db.auth.signOut(); location.reload(); };
       return;
     }
+    await catchUpStatus().catch(e => console.warn('Status catch-up failed', e));
     filters.year = currentYear();
     filters.sort = 'build';
     const saved = recallTM();
