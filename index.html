@@ -194,7 +194,8 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
 
 /* the trading window: 1 Sep -> 31 Jan */
 .window{position:relative; height:6px; background:var(--sink); border-radius:3px; margin-top:11px}
-.window i{position:absolute; top:0; bottom:0; background:var(--live); border-radius:3px}
+.window i{position:absolute; top:0; bottom:0; border-radius:3px;
+  background:linear-gradient(to right, var(--accent) var(--gone, 0%), var(--live) var(--gone, 0%))}
 .window u{position:absolute; top:-3px; width:2px; height:12px; background:var(--amber); text-decoration:none}
 .wlabels{display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:3px}
 
@@ -502,7 +503,14 @@ function sortShops(list){
   if (filters.sort === 'tm')     return list.sort((a,b) => tmName(a).localeCompare(tmName(b)) || byBuild(a,b) || byName(a,b));
   if (filters.sort === 'name')   return list.sort((a,b) => byName(a,b) || byBuild(a,b));
   if (filters.sort === 'status') return list.sort((a,b) => rank(a) - rank(b) || byBuild(a,b) || byName(a,b));
-  return list.sort((a,b) => byBuild(a,b) || byName(a,b));
+  // Build date: builds from yesterday onwards, soonest first; then stores with no
+  // build date; then the ones already built, A to Z.
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  const from = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' +
+               String(y.getDate()).padStart(2, '0');
+  const group = s => !s.build_date ? 1 : s.build_date >= from ? 0 : 2;
+  return list.sort((a,b) => group(a) - group(b)
+    || (group(a) === 0 ? byBuild(a,b) : 0) || byName(a,b));
 }
 
 
@@ -931,7 +939,7 @@ const photosFor = (subject, id) => (D.photos || [])
   .filter(p => p.subject === subject && p.subject_id === id)
   .sort((a,b) => (a.created_at || '').localeCompare(b.created_at || ''));
 
-// The photo marked "Use as main", shown full width under the headline details.
+// The photo marked "Use as main", shown full width at the top of the store, above the operator.
 function featureShot(subject, rec){
   const ph = profilePhoto(subject, rec.id);
   if (!ph) return '';
@@ -1979,7 +1987,8 @@ function helpScreen(){
       All stores. Your last choice is outlined. The <b>area</b> dropdown on the Stores
       screen changes it at any time, and the choice is remembered on that device.</p>
       <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
-      date is the default. Tick <b>Default</b> beside it to open on a different order
+      date is the default: the next builds come first, from yesterday's onwards, then
+      stores with no build date yet, then the ones already built in A to Z order. Tick <b>Default</b> beside it to open on a different order
       next time.</p>
       <p>The <b>season at the top is a dropdown</b> — tap it to jump straight to any
       year, which is the way to do it on a laptop.</p>
@@ -2638,7 +2647,11 @@ function wireList(){
   if (q) q.oninput = () => {
     const had = !!filters.q;
     filters.q = q.value;
-    if (had !== !!filters.q) { render(); document.getElementById('q')?.focus(); }
+    if (had !== !!filters.q){
+      render();
+      const nq = document.getElementById('q');
+      if (nq){ nq.focus(); nq.setSelectionRange(nq.value.length, nq.value.length); }
+    }
     else drawList();
   };
   wireClear();
@@ -2714,7 +2727,10 @@ function tradingWindow(s){
   let bar = '';
   if (s.opening_date && s.closedown_date){
     const a = pos(s.opening_date), b = pos(s.closedown_date);
-    bar += `<i style="left:${a}%;width:${Math.max(1, b - a)}%"></i>`;
+    // the part of the trading time already gone turns red, week by week, until closedown
+    const o = new Date(s.opening_date + 'T00:00:00'), c = new Date(s.closedown_date + 'T00:00:00');
+    const gone = Math.max(0, Math.min(100, ((Date.now() - o) / (c - o)) * 100)) || 0;
+    bar += `<i style="left:${a}%;width:${Math.max(1, b - a)}%;--gone:${gone.toFixed(1)}%"></i>`;
   }
   if (s.build_date) bar += `<u style="left:${pos(s.build_date)}%" title="Build"></u>`;
   return `<div class="window">${bar}</div>
@@ -2864,7 +2880,7 @@ function drawSheet(){
       ${t === 'shops' && openRec.id && !editing ? seasonNav(rec) : ''}
       ${t === 'shops' && !openRec.id ? copyPicker() : ''}
       <form id="form" autocomplete="off">
-        ${t === 'shops' && openRec.id ? headBlock(rec, phaseOf(rec)) + featureShot('shops', rec) : ''}
+        ${t === 'shops' && openRec.id ? featureShot('shops', rec) + headBlock(rec, phaseOf(rec)) : ''}
         ${TABLES[t].fields.map(([grp, fs]) => {
           const phase = t === 'shops' && openRec.id ? phaseOf(rec) : null;
           const html = sectionHtml(t, grp, fs, rec, phase);
