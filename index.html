@@ -183,7 +183,17 @@ select.filter{padding:10px 12px; border:1px solid var(--line); border-radius:var
   padding:3px 9px; cursor:pointer}
 .row:hover{border-color:var(--muted)}
 .row:focus-visible,.btn:focus-visible,nav button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
-.row h3{font-size:16.5px}
+.row h3{font-size:16.5px; padding-right:34px}
+/* group headings and the matching icon in each card's top right corner */
+.gicon{display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px;
+  border-radius:50%; font-size:14px; font-weight:700; line-height:1; flex:0 0 auto}
+.row > .gicon{position:absolute; top:11px; right:12px}
+.g-build .gicon,.gicon.g-build{background:color-mix(in srgb,var(--amber) 18%,transparent); color:var(--amber)}
+.g-trading .gicon,.gicon.g-trading{background:color-mix(in srgb,var(--live) 15%,transparent); color:var(--live)}
+.g-inactive .gicon,.gicon.g-inactive{background:var(--sink); color:var(--muted)}
+.grphead{display:flex; align-items:center; gap:9px; font-size:15px; margin:14px 0 2px}
+.grphead:first-child{margin-top:0}
+.grphead small{margin-left:auto; font-size:13px; font-weight:500; color:var(--muted)}
 .rmeta{font-size:13.5px; color:var(--muted); margin-top:2px}
 .rfoot{display:flex; gap:14px; align-items:center; margin-top:9px; font-size:13px; flex-wrap:wrap}
 .tag{font-size:12px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--sink); color:var(--muted)}
@@ -503,14 +513,33 @@ function sortShops(list){
   if (filters.sort === 'tm')     return list.sort((a,b) => tmName(a).localeCompare(tmName(b)) || byBuild(a,b) || byName(a,b));
   if (filters.sort === 'name')   return list.sort((a,b) => byName(a,b) || byBuild(a,b));
   if (filters.sort === 'status') return list.sort((a,b) => rank(a) - rank(b) || byBuild(a,b) || byName(a,b));
-  // Build date: builds from yesterday onwards, soonest first; then stores with no
-  // build date; then the ones already built, A to Z.
-  const y = new Date(); y.setDate(y.getDate() - 1);
-  const from = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' +
-               String(y.getDate()).padStart(2, '0');
-  const group = s => !s.build_date ? 1 : s.build_date >= from ? 0 : 2;
-  return list.sort((a,b) => group(a) - group(b)
-    || (group(a) === 0 ? byBuild(a,b) : 0) || byName(a,b));
+  // Build date: Yet To Build first (from yesterday's build onwards, soonest first,
+  // then no build date yet), then Trading A to Z, then Inactive A to Z.
+  const order = s => GROUP_ORDER.indexOf(shopGroup(s)) * 2 +
+    (shopGroup(s) === 'build' && !s.build_date ? 1 : 0);
+  return list.sort((a,b) => order(a) - order(b)
+    || (shopGroup(a) === 'build' ? byBuild(a,b) : 0) || byName(a,b));
+}
+
+/* The three groups on the Stores list, each with its heading and card icon.
+   Inactive means not confirmed (Pending or Reserve) or past its closedown date. */
+const GROUP_ORDER = ['build', 'trading', 'inactive'];
+const GROUPS = {
+  build:    {label:'Yet To Build', icon:'?'},
+  trading:  {label:'Trading',      icon:'✓'},
+  inactive: {label:'Inactive',     icon:'✕'},
+};
+const INACTIVE_STATUS = ['Pending', 'Reserve'];
+function isoDay(offset){
+  const d = new Date(); d.setDate(d.getDate() + offset);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+         String(d.getDate()).padStart(2, '0');
+}
+function shopGroup(s){
+  if (INACTIVE_STATUS.includes(s.store_status)) return 'inactive';
+  if (s.closedown_date && s.closedown_date < isoDay(0)) return 'inactive';
+  if (!s.build_date || s.build_date >= isoDay(-1)) return 'build';
+  return 'trading';
 }
 
 
@@ -1987,8 +2016,11 @@ function helpScreen(){
       All stores. Your last choice is outlined. The <b>area</b> dropdown on the Stores
       screen changes it at any time, and the choice is remembered on that device.</p>
       <p>The <b>sort</b> dropdown orders by build date, TM, store name or status. Build
-      date is the default: the next builds come first, from yesterday's onwards, then
-      stores with no build date yet, then the ones already built in A to Z order. Tick <b>Default</b> beside it to open on a different order
+      date is the default, in three groups with a heading each. <b>Yet To Build</b> (?)
+      comes first, from yesterday's build onwards, then stores with no build date yet.
+      <b>Trading</b> (✓) is next, A to Z. <b>Inactive</b> (✕) is last, A to Z: stores that
+      are Pending or Reserve, or past their closedown date. The same icon sits in the
+      top right of every card, whichever order you choose. Tick <b>Default</b> beside it to open on a different order
       next time.</p>
       <p>The <b>season at the top is a dropdown</b> — tap it to jump straight to any
       year, which is the way to do it on a laptop.</p>
@@ -2685,7 +2717,16 @@ function drawList(){
                nameOf('store_types', s.type_id), s.store_status,
                peopleOn(s.id).map(p => p.name).join(' ')].join(' ')));
     items = sortShops(items);
-    html = items.map(shopRow).join('');
+    // On the default order, a heading above each group with how many are in it
+    let last = null;
+    html = items.map(s => {
+      const g = shopGroup(s);
+      if (filters.sort !== 'build' || g === last) return shopRow(s);
+      last = g;
+      const n = items.filter(x => shopGroup(x) === g).length;
+      return `<h3 class="grphead g-${g}"><span class="gicon">${GROUPS[g].icon}</span>${
+        GROUPS[g].label}<small>${n}</small></h3>` + shopRow(s);
+    }).join('');
   } else {
     items = D[tab].filter(r => matches(Object.values(r).join(' ')));
     html = items.map(r => plainRow(tab, r)).join('');
@@ -2769,6 +2810,8 @@ function shopRow(s){
   return `
     <div class="row" data-id="${s.id}" data-name="${esc(s.name)}" role="button" tabindex="0"
       style="border-left-color:${seasonInk(s.operating_year)}; --rowink:${seasonInk(s.operating_year)}">
+      <span class="gicon g-${shopGroup(s)}" title="${GROUPS[shopGroup(s)].label}"
+        aria-label="${GROUPS[shopGroup(s)].label}">${GROUPS[shopGroup(s)].icon}</span>
       <h3>${esc(s.name)}</h3>
       <div class="rmeta">${opPerson ? callButtons(opPerson) : ''}${esc(
         [ops.length ? ops.join(' & ') : 'No operator',
