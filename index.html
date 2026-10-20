@@ -811,6 +811,7 @@ function render(){
           <button data-figures="1">Figures</button>
           <button aria-selected="${tab==='activity'}" data-tab="activity">Activity</button>
           <button aria-selected="${tab==='wishes'}" data-tab="wishes">Wishlist</button>
+          <button data-refresh="1">Refresh</button>
           <button aria-selected="${tab==='help'}" data-tab="help">Help</button>
           <hr>
           <div class="who2">${esc(session?.user?.email || '')}</div>
@@ -845,6 +846,11 @@ function render(){
       document.body.classList.remove('menuon');
     }
   });
+  mn.querySelector('[data-refresh]').onclick = () => {
+    mn.classList.remove('on'); mb.setAttribute('aria-expanded', false);
+    document.body.classList.remove('menuon');
+    refreshAll();
+  };
   mn.querySelector('[data-figures]').onclick = () => {
     mn.classList.remove('on'); mb.setAttribute('aria-expanded', false);
     document.body.classList.remove('menuon');
@@ -1005,6 +1011,19 @@ function contactBlock(rec){
 
 /* -------------------------------------------------------------- the photos */
 const photoURL = {};                    // path -> short-lived link
+const photoAt = {};                     // path -> when that link was made
+// Each link works for an hour. One that is nearly that old is fetched again,
+// so a phone that has had the app open since this morning still shows photos.
+const LINK_LIFE = 50 * 60 * 1000;
+function freshLink(path){
+  if (photoURL[path] && Date.now() - (photoAt[path] || 0) < LINK_LIFE) return photoURL[path];
+  delete photoURL[path]; delete photoAt[path];
+  return '';
+}
+function keepLink(path, url){ photoURL[path] = url; photoAt[path] = Date.now(); }
+function forgetLinks(){
+  Object.keys(photoURL).forEach(k => { delete photoURL[k]; delete photoAt[k]; });
+}
 
 const photosFor = (subject, id) => (D.photos || [])
   .filter(p => p.subject === subject && p.subject_id === id)
@@ -1055,15 +1074,55 @@ async function shrinkImage(file){
 }
 
 async function fillPhotos(){
-  const imgs = [...document.querySelectorAll('img[data-path]')].filter(i => !i.src);
-  const missing = imgs.map(i => i.dataset.path).filter(p => !photoURL[p]);
+  // Any picture with no link yet, or one whose link has run out.
+  const imgs = [...document.querySelectorAll('img[data-path]')]
+    .filter(i => !i.getAttribute('src') || i.getAttribute('src') !== freshLink(i.dataset.path));
+  const missing = [...new Set(imgs.map(i => i.dataset.path).filter(p => !freshLink(p)))];
+  let failed = false;
   if (missing.length){
     try {
-      const {data} = await db.storage.from('cc-photos').createSignedUrls(missing, 3600);
-      (data || []).forEach(d => { if (d.signedUrl) photoURL[d.path] = d.signedUrl; });
-    } catch (e){ /* leave them blank rather than break the page */ }
+      const {data, error} = await db.storage.from('cc-photos').createSignedUrls(missing, 3600);
+      if (error) failed = true;
+      (data || []).forEach(d => { if (d.signedUrl) keepLink(d.path, d.signedUrl); });
+    } catch (e){ failed = true; }
   }
-  imgs.forEach(i => { if (photoURL[i.dataset.path]) i.src = photoURL[i.dataset.path]; });
+  imgs.forEach(i => {
+    const u = freshLink(i.dataset.path);
+    if (!u) return;
+    // A link that will not load is fetched again once, then given up on.
+    i.onerror = () => {
+      if (i.dataset.tried) return;
+      i.dataset.tried = '1';
+      delete photoURL[i.dataset.path];
+      i.removeAttribute('src');
+      fillPhotos();
+    };
+    i.src = u;
+  });
+  // Saying so, rather than leaving gaps that look like nothing is there.
+  if (failed) toast('Photos could not be fetched just now. Menu \u203a Refresh to try again.');
+}
+
+/* Back to the app after a while: renew any photo links that have run out.
+   Nothing else is fetched, so nothing being typed is disturbed. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && session) fillPhotos();
+});
+
+/* Menu > Refresh: everything fetched again, the stores and the photos, so
+   what somebody else added on their phone shows up here too. */
+async function refreshAll(){
+  if (editing){ toast('Save or cancel what you are changing first'); return; }
+  toast('Fetching the latest\u2026');
+  forgetLinks();
+  try { await loadAll(); }
+  catch (e){ toast('Could not reach Calendar Club just now. Try again in a moment.'); return; }
+  const was = openRec;
+  render();
+  if (was && was.id && D[was.table] && D[was.table].some(r => r.id === was.id)){
+    openRec = was; drawSheet();
+  }
+  toast('Up to date');
 }
 
 async function addPhotos(subject, id, files){
@@ -1129,7 +1188,7 @@ async function removePhoto(photoId){
   await db.storage.from('cc-photos').remove([ph.path]);
   logIt('removed a photo from', ph.subject, ph.subject_id, null);
   D.photos = D.photos.filter(p => p.id !== photoId);
-  delete photoURL[ph.path];
+  delete photoURL[ph.path]; delete photoAt[ph.path];
   drawSheet();
 }
 
@@ -1704,10 +1763,10 @@ const planName = v => !v ? '' : isStored(v)
 async function planLink(path){
   if (!path) return '';
   if (!isStored(path)) return path;
-  if (photoURL[path]) return photoURL[path];
+  if (freshLink(path)) return freshLink(path);
   try {
     const {data} = await db.storage.from('cc-photos').createSignedUrl(path, 3600);
-    if (data && data.signedUrl){ photoURL[path] = data.signedUrl; return data.signedUrl; }
+    if (data && data.signedUrl){ keepLink(path, data.signedUrl); return data.signedUrl; }
   } catch (e){ /* fall through */ }
   return '';
 }
@@ -1760,7 +1819,7 @@ async function removePlan(table, id, field, label){
   Object.assign(rec, data);
   if (isStored(was)){
     await db.storage.from('cc-photos').remove([was]);
-    delete photoURL[was];
+    delete photoURL[was]; delete photoAt[was];
   }
   logIt('removed ' + label.toLowerCase(), table, id, null);
   drawSheet();
@@ -2226,7 +2285,9 @@ function helpScreen(){
       yet — ask Barry.</p>
       <p>Can't delete a city, mall or person? Something is still using it. The message
       says what — change those over first and the delete button comes back.</p>
-      <p>Page looks stale or odd? Sign out and back in, which reloads everything.</p>
+      <p>Page looks stale, or photos missing? <b>Menu \u203a Refresh</b> fetches everything
+      again, including anything added on somebody else's phone. Photo links last an hour,
+      and the app now renews them by itself when you come back to it.</p>
       <p>Can't save a change? Your access is probably view only.</p>`)}`;
 }
 
@@ -3073,8 +3134,9 @@ function drawSheet(){
     e.stopPropagation();
     removePhoto(Number(b.dataset.delphoto));
   });
-  el.querySelectorAll('#shots img, .feature img').forEach(img => img.onclick = () => {
-    const u = photoURL[img.dataset.path];
+  el.querySelectorAll('#shots img, .feature img').forEach(img => img.onclick = async () => {
+    // A fresh link if the one on the page has run out.
+    const u = freshLink(img.dataset.path) || await planLink(img.dataset.path);
     if (u) openViewer(u, img.alt || 'Photo', 'image');
   });
   const ap = el.querySelector('#addphoto');
